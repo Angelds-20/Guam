@@ -1,0 +1,31 @@
+{
+  "name": "nuam-mantenedor-tributario",
+  "version": "1.0.0",
+  "description": "Intranet B2B para nuam exchange - Mantenedor de Calificaciones Tributarias y Carga Masiva",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node scripts/run-tests.js"
+  },
+  "keywords": [
+    "nuam",
+    "fintech",
+    "bursatil",
+    "tributario",
+    "corredoras",
+    "aws",
+    "render"
+  ],
+  "author": "RedTech",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.1",
+    "uuid": "^11.1.0",
+    "xlsx": "^0.18.5"
+  }
+}
