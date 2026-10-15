@@ -293,10 +293,10 @@ function aplicarRestriccionesPorRol() {
   if (rango === 'AUDITOR_CMF') {
     // 1. AUDITOR CMF: Modo estricto de fiscalización (Solo Lectura)
     if (banner) {
-      banner.className = 'mx-6 mt-3 p-3 rounded-2xl flex items-center justify-between text-xs font-semibold shadow-xs border bg-purple-50 text-purple-900 border-purple-200';
-      txtBanner.textContent = 'Modo Fiscalización CMF: Acceso de Solo Lectura. La creación de registros, edición e ingesta masiva están restringidas por normativa regulatoria.';
-      badgeBanner.textContent = 'AUDITORÍA CMF';
-      badgeBanner.className = 'text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-purple-200 text-purple-900';
+      banner.className = 'mx-6 mt-2 px-3 py-1.5 rounded-xl flex items-center justify-between text-xs bg-purple-50 text-purple-900 border border-purple-200';
+      txtBanner.textContent = 'Modo Fiscalización CMF: Acceso de Solo Lectura regulatorio.';
+      badgeBanner.textContent = 'SOLO LECTURA';
+      badgeBanner.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-200 text-purple-900';
       if (iconoBanner) iconoBanner.setAttribute('data-lucide', 'shield-alert');
       banner.classList.remove('hidden');
     }
@@ -322,14 +322,9 @@ function aplicarRestriccionesPorRol() {
     }
 
   } else if (rango === 'OPERADOR_SENIOR') {
-    // 2. OPERADOR SENIOR: Ingesta y operaciones, sin facultades destructivas ni admin
+    // 2. OPERADOR SENIOR: Ingesta y operaciones, sin banner invasivo
     if (banner) {
-      banner.className = 'mx-6 mt-3 p-3 rounded-2xl flex items-center justify-between text-xs font-semibold shadow-xs border bg-emerald-50 text-emerald-900 border-emerald-200';
-      txtBanner.textContent = 'Perfil Operador Transaccional: Habilitado para carga masiva y calificaciones. El vaciado masivo y la gestión de usuarios requieren autorización de Jefe de Mesa.';
-      badgeBanner.textContent = 'OPERADOR SENIOR';
-      badgeBanner.className = 'text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-emerald-200 text-emerald-900';
-      if (iconoBanner) iconoBanner.setAttribute('data-lucide', 'user-check');
-      banner.classList.remove('hidden');
+      banner.classList.add('hidden');
     }
     if (btnVaciar) {
       btnVaciar.disabled = true;
@@ -364,14 +359,9 @@ function aplicarRestriccionesPorRol() {
     }
 
   } else if (rango === 'ADMIN_CORREDORA') {
-    // 3. ADMIN CORREDORA: Control pleno de su mesa tributaria
+    // 3. ADMIN CORREDORA: Control pleno sin banner invasivo
     if (banner) {
-      banner.className = 'mx-6 mt-3 p-3 rounded-2xl flex items-center justify-between text-xs font-semibold shadow-xs border bg-indigo-50 text-indigo-900 border-indigo-200';
-      txtBanner.textContent = `Jefatura de Mesa Activa (${corredoraActual ? corredoraActual.nombre : 'Corredora'}): Autoridad para aprobación de lotes, vaciado y restablecimiento de cartera.`;
-      badgeBanner.textContent = 'JEFE DE MESA';
-      badgeBanner.className = 'text-[9px] font-extrabold uppercase px-2 py-0.5 rounded bg-indigo-200 text-indigo-900';
-      if (iconoBanner) iconoBanner.setAttribute('data-lucide', 'badge-check');
-      banner.classList.remove('hidden');
+      banner.classList.add('hidden');
     }
 
     // Aislamiento Multitenant: Admin restringido a la jurisdiccion de su corredora
