@@ -9,15 +9,16 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const Database = require('better-sqlite3');
+require('dotenv').config();
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const AUDIT_FILE = path.join(DATA_DIR, 'auditoria_eventos.json');
-const SQLITE_FILE = path.join(DATA_DIR, 'nuam_tributario.sqlite');
-const SCHEMA_FILE = path.join(DATA_DIR, 'schema.sql');
+const AUDIT_FILE = process.env.AUDIT_FILE || path.join(DATA_DIR, 'auditoria_eventos.json');
+const SQLITE_FILE = process.env.SQLITE_FILE || path.join(DATA_DIR, 'nuam_tributario.sqlite');
+const SCHEMA_FILE = process.env.SCHEMA_FILE || path.join(DATA_DIR, 'schema.sql');
 
 // 1. Inicialización de la Base de Datos Relacional SQLite 3
 const db = new Database(SQLITE_FILE);

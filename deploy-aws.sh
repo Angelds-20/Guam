@@ -12,7 +12,11 @@ sudo dnf update -y || sudo yum update -y
 echo ">>> [2/5] Instalando Node.js 20/22, Git y herramientas de compilación..."
 sudo dnf install -y nodejs npm git gcc-c++ make || sudo yum install -y nodejs npm git gcc-c++ make
 
-echo ">>> [3/5] Instalando dependencias de la aplicación..."
+echo ">>> [3/6] Preparando configuración de entorno e instalando dependencias..."
+if [ ! -f .env ] && [ -f .env.example ]; then
+    echo ">>> Generando archivo .env a partir de .env.example..."
+    cp .env.example .env
+fi
 npm install --production
 
 echo ">>> [4/5] Instalando PM2 (Process Manager) para ejecución continua..."
