@@ -9,8 +9,8 @@ set -e
 echo ">>> [1/5] Actualizando paquetes del sistema en Amazon Linux..."
 sudo dnf update -y || sudo yum update -y
 
-echo ">>> [2/5] Instalando Node.js 20/22 y Git..."
-sudo dnf install -y nodejs npm git || sudo yum install -y nodejs npm git
+echo ">>> [2/5] Instalando Node.js 20/22, Git y herramientas de compilación..."
+sudo dnf install -y nodejs npm git gcc-c++ make || sudo yum install -y nodejs npm git gcc-c++ make
 
 echo ">>> [3/5] Instalando dependencias de la aplicación..."
 npm install --production

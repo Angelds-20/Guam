@@ -10,7 +10,12 @@
 
 const { v4: uuidv4 } = require('uuid');
 const xlsx = require('xlsx');
-const { calificaciones, persistirAuditoria } = require('../models/dataStore');
+const { 
+  calificaciones, 
+  persistirAuditoria, 
+  sqliteGuardarCalificacion, 
+  sqliteEliminarCalificacion 
+} = require('../models/dataStore');
 
 // Almacén temporal en memoria para descargas de rechazos por lote
 const lotesRechazosCache = new Map();
@@ -188,6 +193,9 @@ function crearCalificacion(tenantId, payload, usuario = 'operador@corredora.cl')
   };
 
   calificaciones.unshift(nuevaCalificacion);
+  if (typeof sqliteGuardarCalificacion === 'function') {
+    sqliteGuardarCalificacion(nuevaCalificacion);
+  }
 
   // Registro inmutable de auditoría
   persistirAuditoria({
@@ -250,6 +258,9 @@ function actualizarCalificacion(tenantId, id, payload, usuario = 'operador@corre
   };
   actual.suma_factores = validacion.sumaTotal;
   actual.updated_at = new Date().toISOString();
+  if (typeof sqliteGuardarCalificacion === 'function') {
+    sqliteGuardarCalificacion(actual);
+  }
 
   persistirAuditoria({
     tenant_id: tenantId,
@@ -281,6 +292,9 @@ function eliminarCalificacion(tenantId, id, usuario = 'operador@corredora.cl') {
   }
 
   const eliminada = calificaciones.splice(index, 1)[0];
+  if (typeof sqliteEliminarCalificacion === 'function') {
+    sqliteEliminarCalificacion(id);
+  }
 
   persistirAuditoria({
     tenant_id: tenantId,
@@ -383,6 +397,9 @@ function procesarCargaMasiva(tenantId, fileBuffer, filename, usuario = 'operador
       existente.suma_factores = validacion.sumaTotal;
       existente.updated_at = new Date().toISOString();
       actualizados++;
+      if (typeof sqliteGuardarCalificacion === 'function') {
+        sqliteGuardarCalificacion(existente);
+      }
 
       persistirAuditoria({
         tenant_id: tenantId,
@@ -411,6 +428,9 @@ function procesarCargaMasiva(tenantId, fileBuffer, filename, usuario = 'operador
       };
       calificaciones.unshift(nueva);
       insertados++;
+      if (typeof sqliteGuardarCalificacion === 'function') {
+        sqliteGuardarCalificacion(nueva);
+      }
 
       persistirAuditoria({
         tenant_id: tenantId,
