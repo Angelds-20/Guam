@@ -468,11 +468,21 @@ function renderizarTabla(lista) {
   tbody.innerHTML = '';
 
   if (lista.length === 0) {
+    let mensaje = 'Sin registros para este filtro o corredora.';
+    if (filtroModalidadActivo === 'MONTO') {
+      mensaje = 'No se registran posiciones bajo modalidad Monto para esta corredora.';
+    } else if (filtroModalidadActivo === 'FACTOR') {
+      mensaje = 'No se registran posiciones bajo modalidad Factor para esta corredora.';
+    }
+
     tbody.innerHTML = `
       <tr>
         <td colspan="7" class="text-center py-10 text-slate-400">
           <i data-lucide="inbox" class="w-8 h-8 mx-auto mb-2 text-slate-300"></i>
-          Sin registros para este filtro o corredora.
+          <span class="block text-xs font-semibold text-slate-600">${mensaje}</span>
+          <button onclick="filtrarModalidad('TODOS')" class="mt-2 text-[11px] font-bold text-brand-orange hover:underline">
+            Ver todas las posiciones
+          </button>
         </td>
       </tr>
     `;
