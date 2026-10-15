@@ -517,6 +517,14 @@ function restablecerCalificaciones(tenantId, usuario = 'sistema@nuam.cl') {
   return semillas.length;
 }
 
+// Restaurar todas las semillas oficiales prístinas (útil para tests y reset total)
+function restaurarBaseDatosCompleta() {
+  db.exec('DELETE FROM factores_detalle;');
+  db.exec('DELETE FROM calificaciones_tributarias;');
+  SEMILLAS_OFICIALES.forEach(s => sqliteGuardarCalificacion(s));
+  sincronizarMemoriaDesdeSqlite();
+}
+
 // ==============================================================================
 // GESTIÓN RBAC DE USUARIOS (PERSISTIDA EN SQLITE)
 // ==============================================================================
@@ -657,5 +665,6 @@ module.exports = {
   sqliteGuardarCalificacion,
   sqliteEliminarCalificacion,
   sqliteVaciarCalificaciones,
-  sincronizarMemoriaDesdeSqlite
+  sincronizarMemoriaDesdeSqlite,
+  restaurarBaseDatosCompleta
 };

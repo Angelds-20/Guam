@@ -15,7 +15,10 @@ const AUDIT_FILE = path.join(__dirname, '..', 'src', 'data', 'auditoria_eventos.
 const auditoriaOriginal = fs.readFileSync(AUDIT_FILE, 'utf8');
 
 const tributarioService = require('../src/services/tributarioService');
-const { corredoras, calificaciones, bitacoraAuditoria } = require('../src/models/dataStore');
+const { corredoras, calificaciones, bitacoraAuditoria, restaurarBaseDatosCompleta } = require('../src/models/dataStore');
+
+// Asegurar que SQLite y memoria comiencen en estado oficial limpio
+restaurarBaseDatosCompleta();
 
 // Guardar snapshot del estado de calificaciones antes de los tests
 const calificacionesSnapshot = JSON.parse(JSON.stringify(calificaciones));
@@ -248,9 +251,8 @@ test('PRU-17: exportarDeclaracionExcel genera archivo .xlsx con posiciones de la
 // ====================================================
 console.log('\n  🧹 Restaurando estado original...');
 
-// Restaurar calificaciones al estado previo a los tests
-calificaciones.length = 0;
-calificacionesSnapshot.forEach(c => calificaciones.push(c));
+// Restaurar SQLite y memoria al estado original de producción
+restaurarBaseDatosCompleta();
 
 // Restaurar auditoría al estado previo
 bitacoraAuditoria.length = auditoriaLengthInicial;
@@ -258,7 +260,7 @@ bitacoraAuditoria.length = auditoriaLengthInicial;
 // Restaurar archivo de auditoría en disco
 try {
   fs.writeFileSync(AUDIT_FILE, auditoriaOriginal, 'utf8');
-  console.log('  ✅ Estado restaurado correctamente (auditoría y calificaciones).\n');
+  console.log('  ✅ Estado restaurado correctamente (auditoría, SQLite y memoria).\n');
 } catch (err) {
   console.error('  ⚠️  No se pudo restaurar auditoría en disco:', err.message);
 }
