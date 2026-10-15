@@ -152,7 +152,7 @@ const USUARIOS_OFICIALES = [
     nombre: 'César Contreras',
     tenant_id: 'corr-lv-01',
     rango: 'SUPER_ADMIN',
-    cargo: 'Líder de Arquitectura nuam & Administrador',
+    cargo: 'Administrador General nuam',
     avatar: 'CC',
     estado: 'ACTIVO',
     created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
@@ -163,8 +163,8 @@ const USUARIOS_OFICIALES = [
     email: 'javiera.sepulveda@banchile.cl',
     nombre: 'Javiera Sepúlveda',
     tenant_id: 'corr-bc-02',
-    rango: 'ADMIN_CORREDORA',
-    cargo: 'Jefa de Mesa Tributaria',
+    rango: 'OPERADOR_SENIOR',
+    cargo: 'Operadora de Mesa (Banchile)',
     avatar: 'JS',
     estado: 'ACTIVO',
     created_at: new Date(Date.now() - 3600000 * 36).toISOString(),
@@ -176,7 +176,7 @@ const USUARIOS_OFICIALES = [
     nombre: 'Andrés Mendoza',
     tenant_id: 'corr-cc-03',
     rango: 'OPERADOR_SENIOR',
-    cargo: 'Operador Renta Variable nuam',
+    cargo: 'Operador Transaccional (Credicorp)',
     avatar: 'AM',
     estado: 'ACTIVO',
     created_at: new Date(Date.now() - 3600000 * 24).toISOString(),
@@ -188,7 +188,7 @@ const USUARIOS_OFICIALES = [
     nombre: 'Fiscalizador CMF Chile',
     tenant_id: 'GLOBAL',
     rango: 'AUDITOR_CMF',
-    cargo: 'Auditor Regulador Bursátil',
+    cargo: 'Auditor Regulatorio CMF',
     avatar: 'CM',
     estado: 'ACTIVO',
     created_at: new Date(Date.now() - 3600000 * 72).toISOString(),
@@ -531,10 +531,10 @@ function restaurarBaseDatosCompleta() {
 // ==============================================================================
 
 const RANGOS_SISTEMA = {
-  SUPER_ADMIN: { nivel: 1, codigo: 'SUPER_ADMIN', nombre: 'Super Administrador nuam' },
-  ADMIN_CORREDORA: { nivel: 2, codigo: 'ADMIN_CORREDORA', nombre: 'Administrador de Mesa / Jefe Tributario' },
-  OPERADOR_SENIOR: { nivel: 3, codigo: 'OPERADOR_SENIOR', nombre: 'Operador Transaccional Senior' },
-  AUDITOR_CMF: { nivel: 4, codigo: 'AUDITOR_CMF', nombre: 'Auditor CMF / Regulador Externo' }
+  SUPER_ADMIN: { nivel: 1, codigo: 'SUPER_ADMIN', nombre: 'Administrador' },
+  OPERADOR_SENIOR: { nivel: 2, codigo: 'OPERADOR_SENIOR', nombre: 'Operador' },
+  AUDITOR_CMF: { nivel: 3, codigo: 'AUDITOR_CMF', nombre: 'Auditor' },
+  ADMIN_CORREDORA: { nivel: 2, codigo: 'ADMIN_CORREDORA', nombre: 'Operador' }
 };
 
 function listarUsuarios(filtroTenant = null) {

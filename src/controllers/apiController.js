@@ -243,8 +243,8 @@ function vaciarCartera(req, res) {
   }
 
   const usr = obtenerUsuarioPorEmail(usuario);
-  if (usr && (usr.rango === 'AUDITOR_CMF' || usr.rango === 'OPERADOR_SENIOR')) {
-    return res.status(403).json({ success: false, error: `Acceso Denegado: Su rango (${usr.rango}) no tiene autorización para vaciar carteras institucionales.` });
+  if (usr && usr.rango !== 'SUPER_ADMIN') {
+    return res.status(403).json({ success: false, error: 'Acceso Denegado: Solo el Administrador tiene autorización para vaciar carteras institucionales.' });
   }
 
   const eliminados = dataStore.vaciarCalificaciones(tenant_id, usuario);
@@ -263,8 +263,8 @@ function restablecerCartera(req, res) {
   }
 
   const usr = obtenerUsuarioPorEmail(usuario);
-  if (usr && (usr.rango === 'AUDITOR_CMF' || usr.rango === 'OPERADOR_SENIOR')) {
-    return res.status(403).json({ success: false, error: `Acceso Denegado: Su rango (${usr.rango}) no tiene autorización para restablecer carteras.` });
+  if (usr && usr.rango !== 'SUPER_ADMIN') {
+    return res.status(403).json({ success: false, error: 'Acceso Denegado: Solo el Administrador tiene autorización para restablecer carteras.' });
   }
 
   const count = dataStore.restablecerCalificaciones(tenant_id);
@@ -276,10 +276,16 @@ function restablecerCartera(req, res) {
 }
 
 // ==============================================================================
-// CONTROLADOR DE USUARIOS Y GESTIÓN DE RANGOS / ROLES (RBAC)
+// CONTROLADOR DE USUARIOS Y GESTIÓN DE ROLES (EXCLUSIVO ADMINISTRADOR)
 // ==============================================================================
 
 function listarUsuarios(req, res) {
+  const autor = req.query.usuario || req.headers['x-user-email'];
+  const autorUsr = obtenerUsuarioPorEmail(autor);
+  if (autorUsr && autorUsr.rango !== 'SUPER_ADMIN') {
+    return res.status(403).json({ success: false, error: 'Acceso Denegado: El área de perfiles y permisos es exclusiva del Administrador.' });
+  }
+
   const tenantId = req.query.tenant_id;
   const lista = dataStore.listarUsuarios(tenantId);
   res.json({
@@ -295,20 +301,14 @@ function crearUsuario(req, res) {
     const autor = req.body.autor || req.headers['x-user-email'] || 'admin@nuam.cl';
     const autorUsr = obtenerUsuarioPorEmail(autor);
 
-    if (autorUsr && (autorUsr.rango === 'AUDITOR_CMF' || autorUsr.rango === 'OPERADOR_SENIOR')) {
-      return res.status(403).json({ success: false, error: `Acceso Denegado: Su rango (${autorUsr.rango}) no posee permisos para crear cuentas.` });
-    }
-
-    if (autorUsr && autorUsr.rango === 'ADMIN_CORREDORA') {
-      if (req.body.rango === 'SUPER_ADMIN' || req.body.rango === 'AUDITOR_CMF') {
-        return res.status(403).json({ success: false, error: 'Acceso Denegado: Un Jefe de Mesa no puede otorgar rangos de Super Admin o Auditor.' });
-      }
+    if (!autorUsr || autorUsr.rango !== 'SUPER_ADMIN') {
+      return res.status(403).json({ success: false, error: 'Acceso Denegado: Solo el Administrador puede crear cuentas y asignar roles.' });
     }
 
     const nuevo = dataStore.crearUsuario(req.body, autor);
     res.status(201).json({
       success: true,
-      mensaje: `Usuario ${nuevo.nombre} creado exitosamente con rango ${nuevo.rango}.`,
+      mensaje: `Usuario ${nuevo.nombre} creado exitosamente con rol ${nuevo.rango}.`,
       data: nuevo
     });
   } catch (err) {
@@ -322,13 +322,8 @@ function actualizarUsuario(req, res) {
     const autor = req.body.autor || req.headers['x-user-email'] || 'admin@nuam.cl';
     const autorUsr = obtenerUsuarioPorEmail(autor);
 
-    if (autorUsr && (autorUsr.rango === 'AUDITOR_CMF' || autorUsr.rango === 'OPERADOR_SENIOR')) {
-      return res.status(403).json({ success: false, error: `Acceso Denegado: Su rango (${autorUsr.rango}) no posee permisos para modificar cuentas.` });
-    }
-
-    const target = dataStore.usuarios.find(u => u.id === id);
-    if (target && target.rango === 'SUPER_ADMIN' && autorUsr && autorUsr.rango !== 'SUPER_ADMIN') {
-      return res.status(403).json({ success: false, error: 'Acceso Denegado: Solo un Super Administrador puede modificar a otro Super Administrador.' });
+    if (!autorUsr || autorUsr.rango !== 'SUPER_ADMIN') {
+      return res.status(403).json({ success: false, error: 'Acceso Denegado: Solo el Administrador puede modificar usuarios y permisos.' });
     }
 
     const actualizado = dataStore.actualizarUsuario(id, req.body, autor);
@@ -345,16 +340,16 @@ function actualizarUsuario(req, res) {
 function eliminarUsuario(req, res) {
   try {
     const id = req.params.id;
-    const autor = req.query.autor || 'admin@nuam.cl';
+    const autor = req.query.autor || req.headers['x-user-email'] || 'admin@nuam.cl';
     const autorUsr = obtenerUsuarioPorEmail(autor);
 
-    if (autorUsr && (autorUsr.rango === 'AUDITOR_CMF' || autorUsr.rango === 'OPERADOR_SENIOR')) {
-      return res.status(403).json({ success: false, error: `Acceso Denegado: Su rango (${autorUsr.rango}) no posee permisos para revocar cuentas.` });
+    if (!autorUsr || autorUsr.rango !== 'SUPER_ADMIN') {
+      return res.status(403).json({ success: false, error: 'Acceso Denegado: Solo el Administrador puede revocar cuentas de usuario.' });
     }
 
     const target = dataStore.usuarios.find(u => u.id === id);
-    if (target && target.rango === 'SUPER_ADMIN' && autorUsr && autorUsr.rango !== 'SUPER_ADMIN') {
-      return res.status(403).json({ success: false, error: 'Acceso Denegado: Solo un Super Administrador puede revocar a un Super Administrador.' });
+    if (target && target.rango === 'SUPER_ADMIN') {
+      return res.status(403).json({ success: false, error: 'Acceso Denegado: No se puede revocar la cuenta de Administrador principal.' });
     }
 
     const eliminado = dataStore.eliminarUsuario(id, autor);

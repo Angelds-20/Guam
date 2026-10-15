@@ -229,10 +229,10 @@ function actualizarBadgesTenant() {
 
     if (badgeRango) {
       const rankStyles = {
-        'SUPER_ADMIN': { label: 'SUPER ADMIN', class: 'bg-amber-100 text-amber-800 border-amber-300' },
-        'ADMIN_CORREDORA': { label: 'ADMIN MESA', class: 'bg-indigo-100 text-indigo-800 border-indigo-300' },
-        'OPERADOR_SENIOR': { label: 'OPERADOR SR', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-        'AUDITOR_CMF': { label: 'AUDITOR CMF', class: 'bg-slate-100 text-slate-700 border-slate-300' }
+        'SUPER_ADMIN': { label: 'ADMINISTRADOR', class: 'bg-amber-100 text-amber-800 border-amber-300' },
+        'ADMIN_CORREDORA': { label: 'OPERADOR', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+        'OPERADOR_SENIOR': { label: 'OPERADOR', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+        'AUDITOR_CMF': { label: 'AUDITOR', class: 'bg-purple-100 text-purple-800 border-purple-300' }
       };
       const info = rankStyles[savedRank] || { label: savedRank, class: 'bg-slate-100 text-slate-700 border-slate-200' };
       badgeRango.textContent = info.label;
@@ -242,7 +242,7 @@ function actualizarBadgesTenant() {
   }
 }
 
-// Aplicar Reglas y Restricciones Estrictas de Privilegios por Rango (RBAC)
+// Aplicar Reglas y Restricciones Estrictas de Privilegios por Rol (RBAC)
 function aplicarRestriccionesPorRol() {
   const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
   const banner = document.getElementById('bannerRestriccionRol');
@@ -250,96 +250,93 @@ function aplicarRestriccionesPorRol() {
   const badgeBanner = document.getElementById('badgeRestriccionRol');
   const iconoBanner = document.getElementById('iconoRestriccionRol');
 
+  const navCalTexto = document.getElementById('navCalificacionesTexto');
+  const navCarga = document.getElementById('navCargaMasiva');
+  const navAuditoria = document.getElementById('navAuditoria');
+  const navBolsa = document.getElementById('navBolsaCentral');
+  const navUsr = document.getElementById('navUsuarios');
+
+  const subtituloVista = document.getElementById('badgeSubtituloVista');
+  const btnNuevoContenedor = document.getElementById('btnNuevoContenedor');
   const btnNuevo = document.getElementById('btnNuevaCalificacionHero');
   const btnCargaHero = document.getElementById('btnCargaMasivaHero');
   const btnVaciar = document.getElementById('btnVaciarCartera');
   const btnSemilla = document.getElementById('btnRestablecerSemilla');
   const btnCrearUsr = document.getElementById('btnCrearUsuario');
-  const navCarga = document.getElementById('navCargaMasiva');
-  const navUsr = document.getElementById('navUsuarios');
   const tenantSelect = document.getElementById('tenantSelect');
+
   const cardLV = document.getElementById('cardAutoCargaLV');
   const cardBC = document.getElementById('cardAutoCargaBC');
   const cardCC = document.getElementById('cardAutoCargaCC');
   const cardRechazo = document.getElementById('cardAutoCargaRechazo');
 
-  // Reset de estados por defecto
-  if (btnNuevo) btnNuevo.classList.remove('hidden');
-  if (btnCargaHero) btnCargaHero.classList.remove('hidden');
-  if (navCarga) navCarga.classList.remove('hidden');
-  if (navUsr) navUsr.classList.remove('hidden');
-  if (btnCrearUsr) btnCrearUsr.classList.remove('hidden');
-  if (cardLV) cardLV.classList.remove('hidden');
-  if (cardBC) cardBC.classList.remove('hidden');
-  if (cardCC) cardCC.classList.remove('hidden');
-  if (cardRechazo) cardRechazo.classList.remove('hidden');
-
-  if (btnVaciar) {
-    btnVaciar.disabled = false;
-    btnVaciar.classList.remove('opacity-40', 'cursor-not-allowed');
-    btnVaciar.title = 'Vaciar cartera para demostrar ingesta limpia desde cero';
-  }
-  if (btnSemilla) {
-    btnSemilla.disabled = false;
-    btnSemilla.classList.remove('opacity-40', 'cursor-not-allowed');
-    btnSemilla.title = 'Restablecer posiciones institucionales oficiales';
-  }
-  if (tenantSelect) {
-    tenantSelect.disabled = false;
-    tenantSelect.classList.remove('opacity-60', 'cursor-not-allowed');
-    tenantSelect.title = 'Seleccionar Corredora de Bolsa Participante';
-  }
-
-  if (rango === 'AUDITOR_CMF') {
-    // 1. AUDITOR CMF: Modo estricto de fiscalización (Solo Lectura)
-    if (banner) {
-      banner.className = 'mx-6 mt-2 px-3 py-1.5 rounded-xl flex items-center justify-between text-xs bg-purple-50 text-purple-900 border border-purple-200';
-      txtBanner.textContent = 'Modo Fiscalización CMF: Acceso de Solo Lectura regulatorio.';
-      badgeBanner.textContent = 'SOLO LECTURA';
-      badgeBanner.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-200 text-purple-900';
-      if (iconoBanner) iconoBanner.setAttribute('data-lucide', 'shield-alert');
-      banner.classList.remove('hidden');
+  // Redirección de seguridad si un no-admin está en la sección de usuarios
+  if (rango !== 'SUPER_ADMIN') {
+    const secUsr = document.getElementById('seccionUsuarios');
+    if (secUsr && !secUsr.classList.contains('hidden')) {
+      cambiarSeccion('calificaciones');
     }
+  }
+
+  // 1. ÁREA DE PERFILES Y PERMISOS: Solo accesible y visible para el ADMINISTRADOR
+  if (navUsr) {
+    if (rango === 'SUPER_ADMIN') {
+      navUsr.classList.remove('hidden');
+    } else {
+      navUsr.classList.add('hidden');
+    }
+  }
+
+  // 2. VISTAS PERSONALIZADAS SEGÚN EL ROL
+  if (rango === 'AUDITOR_CMF') {
+    // ==========================================
+    // VISTA DEL AUDITOR (Fiscalización y Consulta)
+    // ==========================================
+    if (navCalTexto) navCalTexto.textContent = 'Inspección de Carteras';
+    if (navCarga) navCarga.classList.add('hidden'); // El auditor no sube archivos
+    if (navAuditoria) navAuditoria.classList.remove('hidden'); // Su herramienta clave
+    if (subtituloVista) subtituloVista.textContent = 'Inspección Regulatoria de Mercado (Solo Lectura)';
+
+    if (btnNuevoContenedor) btnNuevoContenedor.classList.add('hidden');
     if (btnNuevo) btnNuevo.classList.add('hidden');
     if (btnCargaHero) btnCargaHero.classList.add('hidden');
-    if (navCarga) navCarga.classList.add('hidden'); // Ocultar pestaña Carga Masiva
-    if (btnVaciar) {
-      btnVaciar.disabled = true;
-      btnVaciar.classList.add('opacity-40', 'cursor-not-allowed');
-      btnVaciar.title = 'Acción bloqueada para perfil Auditor CMF (Solo Lectura)';
-    }
-    if (btnSemilla) {
-      btnSemilla.disabled = true;
-      btnSemilla.classList.add('opacity-40', 'cursor-not-allowed');
-      btnSemilla.title = 'Acción bloqueada para perfil Auditor CMF (Solo Lectura)';
-    }
+    if (btnVaciar) btnVaciar.classList.add('hidden');
+    if (btnSemilla) btnSemilla.classList.add('hidden');
     if (btnCrearUsr) btnCrearUsr.classList.add('hidden');
-    // Auditor CMF sí puede cambiar de corredora para fiscalizar
+
+    // El Auditor puede auditar cualquier corredora
     if (tenantSelect) {
       tenantSelect.disabled = false;
       tenantSelect.classList.remove('opacity-60', 'cursor-not-allowed');
-      tenantSelect.title = 'Fiscalización CMF: Puede inspeccionar cualquiera de las corredoras participantes';
+      tenantSelect.title = 'Fiscalización CMF: Inspección libre entre corredoras';
     }
 
-  } else if (rango === 'OPERADOR_SENIOR') {
-    // 2. OPERADOR SENIOR: Ingesta y operaciones, sin banner invasivo
     if (banner) {
-      banner.classList.add('hidden');
+      banner.className = 'mx-6 mt-2 px-3 py-1.5 rounded-xl flex items-center justify-between text-xs bg-purple-50 text-purple-900 border border-purple-200';
+      txtBanner.textContent = 'Modo Fiscalización CMF: Consulta e inspección regulatoria en tiempo real.';
+      badgeBanner.textContent = 'AUDITOR';
+      badgeBanner.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-200 text-purple-900';
+      if (iconoBanner) iconoBanner.setAttribute('data-lucide', 'shield-check');
+      banner.classList.remove('hidden');
     }
-    if (btnVaciar) {
-      btnVaciar.disabled = true;
-      btnVaciar.classList.add('opacity-40', 'cursor-not-allowed');
-      btnVaciar.title = 'Acción restringida: Requiere rango de Jefe de Mesa (Admin Corredora)';
-    }
-    if (btnSemilla) {
-      btnSemilla.disabled = true;
-      btnSemilla.classList.add('opacity-40', 'cursor-not-allowed');
-      btnSemilla.title = 'Acción restringida: Requiere rango de Jefe de Mesa (Admin Corredora)';
-    }
-    if (btnCrearUsr) btnCrearUsr.classList.add('hidden');
-    if (navUsr) navUsr.classList.add('hidden'); // Ocultar Panel Admin para Operadores
 
-    // Aislamiento Multitenant: Operador bloqueado a su corredora asignada
+  } else if (rango === 'OPERADOR_SENIOR' || rango === 'ADMIN_CORREDORA') {
+    // ==========================================
+    // VISTA DEL OPERADOR (Mesa de Trabajo Operativa)
+    // ==========================================
+    if (navCalTexto) navCalTexto.textContent = 'Mis Calificaciones';
+    if (navCarga) navCarga.classList.remove('hidden'); // Ingesta masiva activa
+    if (navAuditoria) navAuditoria.classList.add('hidden'); // Oculto: no compete a operación diaria
+    if (subtituloVista) subtituloVista.textContent = 'Mesa de Trabajo Operativa';
+
+    if (btnNuevoContenedor) btnNuevoContenedor.classList.remove('hidden');
+    if (btnNuevo) btnNuevo.classList.remove('hidden');
+    if (btnCargaHero) btnCargaHero.classList.remove('hidden');
+    if (btnVaciar) btnVaciar.classList.add('hidden'); // Herramientas de riesgo ocultas
+    if (btnSemilla) btnSemilla.classList.add('hidden');
+    if (btnCrearUsr) btnCrearUsr.classList.add('hidden');
+
+    // Aislamiento Multitenant: Operador bloqueado estrictamente a su corredora asignada
     if (tenantSelect) {
       tenantSelect.disabled = true;
       tenantSelect.classList.add('opacity-60', 'cursor-not-allowed');
@@ -347,6 +344,9 @@ function aplicarRestriccionesPorRol() {
     }
 
     // Aislamiento en Carga Masiva: Ocultar tarjetas de otras corredoras
+    if (cardLV) cardLV.classList.remove('hidden');
+    if (cardBC) cardBC.classList.remove('hidden');
+    if (cardCC) cardCC.classList.remove('hidden');
     if (tenantActivo === 'corr-cc-03') {
       if (cardLV) cardLV.classList.add('hidden');
       if (cardBC) cardBC.classList.add('hidden');
@@ -358,41 +358,45 @@ function aplicarRestriccionesPorRol() {
       if (cardCC) cardCC.classList.add('hidden');
     }
 
-  } else if (rango === 'ADMIN_CORREDORA') {
-    // 3. ADMIN CORREDORA: Control pleno sin banner invasivo
-    if (banner) {
-      banner.classList.add('hidden');
-    }
-
-    // Aislamiento Multitenant: Admin restringido a la jurisdiccion de su corredora
-    if (tenantSelect) {
-      tenantSelect.disabled = true;
-      tenantSelect.classList.add('opacity-60', 'cursor-not-allowed');
-      tenantSelect.title = 'Aislamiento Multitenant: Su jurisdicción está restringida a su corredora.';
-    }
-
-    // Aislamiento en Carga Masiva: Ocultar tarjetas de otras corredoras competidoras
-    if (tenantActivo === 'corr-bc-02') {
-      if (cardLV) cardLV.classList.add('hidden');
-      if (cardCC) cardCC.classList.add('hidden');
-    } else if (tenantActivo === 'corr-cc-03') {
-      if (cardLV) cardLV.classList.add('hidden');
-      if (cardBC) cardBC.classList.add('hidden');
-    } else if (tenantActivo === 'corr-lv-01') {
-      if (cardBC) cardBC.classList.add('hidden');
-      if (cardCC) cardCC.classList.add('hidden');
-    }
+    if (banner) banner.classList.add('hidden');
 
   } else {
-    // 4. SUPER_ADMIN: Control Total
-    if (banner) {
-      banner.classList.add('hidden');
+    // ==========================================
+    // VISTA DEL ADMINISTRADOR (Control Total)
+    // ==========================================
+    if (navCalTexto) navCalTexto.textContent = 'Calificaciones';
+    if (navCarga) navCarga.classList.remove('hidden');
+    if (navAuditoria) navAuditoria.classList.remove('hidden');
+    if (subtituloVista) subtituloVista.textContent = 'Consola de Control Central';
+
+    if (btnNuevoContenedor) btnNuevoContenedor.classList.remove('hidden');
+    if (btnNuevo) btnNuevo.classList.remove('hidden');
+    if (btnCargaHero) btnCargaHero.classList.remove('hidden');
+    if (btnVaciar) {
+      btnVaciar.classList.remove('hidden');
+      btnVaciar.disabled = false;
+      btnVaciar.classList.remove('opacity-40', 'cursor-not-allowed');
+      btnVaciar.title = 'Vaciar cartera para demostrar ingesta limpia desde cero';
     }
+    if (btnSemilla) {
+      btnSemilla.classList.remove('hidden');
+      btnSemilla.disabled = false;
+      btnSemilla.classList.remove('opacity-40', 'cursor-not-allowed');
+      btnSemilla.title = 'Restablecer posiciones institucionales oficiales';
+    }
+    if (btnCrearUsr) btnCrearUsr.classList.remove('hidden');
+
+    if (cardLV) cardLV.classList.remove('hidden');
+    if (cardBC) cardBC.classList.remove('hidden');
+    if (cardCC) cardCC.classList.remove('hidden');
+
     if (tenantSelect) {
       tenantSelect.disabled = false;
       tenantSelect.classList.remove('opacity-60', 'cursor-not-allowed');
-      tenantSelect.title = 'Super Administrador nuam: Acceso global a todas las corredoras';
+      tenantSelect.title = 'Administrador nuam: Acceso global a todas las corredoras';
     }
+
+    if (banner) banner.classList.add('hidden');
   }
 
   if (window.lucide) lucide.createIcons();
@@ -576,13 +580,17 @@ function actualizarMetricas() {
 function cambiarSeccion(seccion) {
   const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
 
-  // Guard de acceso por rol
+  // Guard de acceso por rol: Usuarios y Permisos es exclusivo del Administrador
+  if (rango !== 'SUPER_ADMIN' && seccion === 'usuarios') {
+    mostrarAlerta('Acceso Denegado: El área de perfiles y permisos es exclusiva del Administrador.', 'error');
+    seccion = (rango === 'AUDITOR_CMF' ? 'auditoria' : 'calificaciones');
+  }
   if (rango === 'AUDITOR_CMF' && seccion === 'cargamasiva') {
-    mostrarAlerta('Acceso Denegado: El perfil Auditor CMF opera en modo de solo fiscalización y no puede acceder a Carga Masiva.', 'error');
+    mostrarAlerta('Acceso Denegado: El perfil Auditor opera en modo de solo fiscalización y no puede acceder a Carga Masiva.', 'error');
     seccion = 'calificaciones';
   }
-  if (rango === 'OPERADOR_SENIOR' && seccion === 'usuarios') {
-    mostrarAlerta('Acceso Denegado: El Panel Admin está reservado para Administradores de Mesa y Super Admin.', 'error');
+  if (rango !== 'SUPER_ADMIN' && rango !== 'AUDITOR_CMF' && seccion === 'auditoria') {
+    mostrarAlerta('Acceso Denegado: La bitácora de auditoría es para fiscalizadores y administradores.', 'error');
     seccion = 'calificaciones';
   }
 
@@ -1475,12 +1483,15 @@ function cerrarAlerta() {
 
 async function cargarUsuarios() {
   try {
-    const res = await fetch('/api/usuarios');
+    const userEmail = sessionStorage.getItem('nuam_user_email') || 'cesar.contreras@larrainvial.com';
+    const res = await fetch(`/api/usuarios?usuario=${encodeURIComponent(userEmail)}`);
     const json = await res.json();
     if (json.success) {
       usuariosActuales = json.data;
       actualizarMetricasUsuarios();
       filtrarTablaUsuarios();
+    } else {
+      mostrarAlerta(json.error || 'Acceso restringido a usuarios', 'error');
     }
   } catch (err) {
     mostrarAlerta('Error cargando cuentas de usuarios: ' + err.message, 'error');
@@ -1490,8 +1501,8 @@ async function cargarUsuarios() {
 function actualizarMetricasUsuarios() {
   const total = usuariosActuales.length;
   const superAdmins = usuariosActuales.filter(u => u.rango === 'SUPER_ADMIN').length;
-  const adminsMesa = usuariosActuales.filter(u => u.rango === 'ADMIN_CORREDORA').length;
-  const operAuditores = usuariosActuales.filter(u => u.rango === 'OPERADOR_SENIOR' || u.rango === 'AUDITOR_CMF').length;
+  const operadores = usuariosActuales.filter(u => u.rango === 'OPERADOR_SENIOR' || u.rango === 'ADMIN_CORREDORA').length;
+  const auditores = usuariosActuales.filter(u => u.rango === 'AUDITOR_CMF').length;
 
   const elTotal = document.getElementById('statTotalUsuarios');
   const elSuper = document.getElementById('statSuperAdmins');
@@ -1499,9 +1510,9 @@ function actualizarMetricasUsuarios() {
   const elOper = document.getElementById('statOperadoresAuditores');
 
   if (elTotal) elTotal.textContent = `${total} ${total === 1 ? 'Cuenta' : 'Cuentas'}`;
-  if (elSuper) elSuper.textContent = `${superAdmins} Super Admin`;
-  if (elAdmins) elAdmins.textContent = `${adminsMesa} Admin${adminsMesa === 1 ? '' : 's'} Mesa`;
-  if (elOper) elOper.textContent = `${operAuditores} Operativo${operAuditores === 1 ? '' : 's'}`;
+  if (elSuper) elSuper.textContent = `${superAdmins} Administrador${superAdmins === 1 ? '' : 'es'}`;
+  if (elAdmins) elAdmins.textContent = `${operadores} Operador${operadores === 1 ? '' : 'es'}`;
+  if (elOper) elOper.textContent = `${auditores} Auditor${auditores === 1 ? '' : 'es'}`;
 }
 
 function filtrarUsuariosRango(rango) {
@@ -1569,24 +1580,24 @@ function renderizarTablaUsuarios(lista) {
 
   const badgeRangos = {
     'SUPER_ADMIN': { 
-      label: 'SUPER ADMIN (N1)', 
+      label: 'ADMINISTRADOR', 
       bg: 'bg-amber-100 text-amber-800 border-amber-300', 
       dot: 'bg-amber-500' 
     },
-    'ADMIN_CORREDORA': { 
-      label: 'ADMIN MESA (N2)', 
-      bg: 'bg-indigo-100 text-indigo-800 border-indigo-300', 
-      dot: 'bg-indigo-500' 
-    },
     'OPERADOR_SENIOR': { 
-      label: 'OPERADOR SR (N3)', 
+      label: 'OPERADOR', 
+      bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', 
+      dot: 'bg-emerald-500' 
+    },
+    'ADMIN_CORREDORA': { 
+      label: 'OPERADOR', 
       bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', 
       dot: 'bg-emerald-500' 
     },
     'AUDITOR_CMF': { 
-      label: 'AUDITOR CMF (N4)', 
-      bg: 'bg-slate-100 text-slate-700 border-slate-300', 
-      dot: 'bg-slate-400' 
+      label: 'AUDITOR', 
+      bg: 'bg-purple-100 text-purple-800 border-purple-300', 
+      dot: 'bg-purple-500' 
     }
   };
 
@@ -1602,9 +1613,9 @@ function renderizarTablaUsuarios(lista) {
     const estadoActivo = (u.estado || 'ACTIVO') === 'ACTIVO';
     const initials = u.avatar || (u.nombre ? u.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase() : 'OP');
 
-    // Permisos por fila según rango activo
-    const puedeEditarFila = miRangoActual === 'SUPER_ADMIN' || (miRangoActual === 'ADMIN_CORREDORA' && u.rango !== 'SUPER_ADMIN' && u.tenant_id === tenantActivo);
-    const puedeEliminarFila = miRangoActual === 'SUPER_ADMIN' || (miRangoActual === 'ADMIN_CORREDORA' && u.rango !== 'SUPER_ADMIN' && u.rango !== 'AUDITOR_CMF' && u.tenant_id === tenantActivo);
+    // Permisos por fila: Exclusivo del Administrador
+    const puedeEditarFila = miRangoActual === 'SUPER_ADMIN';
+    const puedeEliminarFila = miRangoActual === 'SUPER_ADMIN' && u.rango !== 'SUPER_ADMIN';
 
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-slate-50 transition border-b border-slate-100';

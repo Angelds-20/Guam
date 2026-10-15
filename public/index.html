@@ -234,7 +234,7 @@
       <nav class="hidden md:flex items-center bg-slate-100/80 p-1 rounded-2xl border border-slate-200/60 space-x-1 text-xs font-semibold">
         <button id="navCalificaciones" onclick="cambiarSeccion('calificaciones')" class="px-4 py-2 rounded-xl bg-brand-black text-white shadow-xs flex items-center space-x-2 transition">
           <i data-lucide="layout-grid" class="w-3.5 h-3.5 text-brand-orange"></i>
-          <span>Calificaciones</span>
+          <span id="navCalificacionesTexto">Calificaciones</span>
         </button>
 
         <button id="navCargaMasiva" onclick="cambiarSeccion('cargamasiva')" class="px-4 py-2 rounded-xl text-slate-600 hover:text-brand-black hover:bg-white/80 flex items-center space-x-2 transition">
@@ -252,9 +252,9 @@
           <span>Bolsa nuam (Core)</span>
         </button>
 
-        <button id="navUsuarios" onclick="cambiarSeccion('usuarios')" class="px-4 py-2 rounded-xl text-slate-600 hover:text-brand-black hover:bg-white/80 flex items-center space-x-2 transition" title="Panel de Administración de Cuentas, Rangos y Roles (RBAC)">
-          <i data-lucide="users" class="w-3.5 h-3.5 text-brand-orange"></i>
-          <span>Panel Admin</span>
+        <button id="navUsuarios" onclick="cambiarSeccion('usuarios')" class="px-4 py-2 rounded-xl text-slate-600 hover:text-brand-black hover:bg-white/80 flex items-center space-x-2 transition" title="Gestión de Cuentas y Permisos (Exclusivo Administrador)">
+          <i data-lucide="shield" class="w-3.5 h-3.5 text-brand-orange"></i>
+          <span>Permisos & Usuarios</span>
         </button>
       </nav>
 
@@ -339,9 +339,10 @@
               <span id="badgeTenantInitials" class="w-8 h-8 rounded-xl bg-slate-900 text-white font-bold text-xs flex items-center justify-center shadow-xs">LV</span>
               <div>
                 <span class="font-extrabold text-base text-brand-black tracking-tight block" id="badgeTenantHero">LarraínVial Corredora de Bolsa</span>
+                <span id="badgeSubtituloVista" class="text-[10px] text-slate-400 font-medium block">Consola de Control Central</span>
                 <span id="badgeTenantActivo" class="hidden">LARRAIN_VIAL</span>
               </div>
-              <div class="pl-2 border-l border-slate-200">
+              <div id="btnNuevoContenedor" class="pl-2 border-l border-slate-200">
                 <button id="btnNuevaCalificacionHero" onclick="abrirModalNuevo()" class="px-4 py-2 bg-brand-black hover:bg-black text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center space-x-1.5">
                   <i data-lucide="plus" class="w-3.5 h-3.5 text-brand-orange"></i>
                   <span>Nueva Calificación</span>
@@ -719,47 +720,47 @@
             
             <div class="bg-brand-black text-white p-5 rounded-3xl border border-slate-800 shadow-sm relative overflow-hidden flex flex-col justify-between">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Control de Accesos</span>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Cuentas</span>
                 <span class="w-6 h-6 rounded-lg bg-white/10 flex items-center justify-center text-brand-orange">
                   <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
                 </span>
               </div>
               <div class="mt-3">
                 <div class="text-2xl font-mono font-extrabold text-white" id="statTotalUsuarios">4 Cuentas</div>
-                <span class="text-[10px] text-slate-400 mt-0.5 block">Gestión Centralizada RBAC</span>
+                <span class="text-[10px] text-slate-400 mt-0.5 block">Gestión Centralizada</span>
               </div>
             </div>
 
             <div class="bg-white p-5 rounded-3xl border border-brand-border shadow-xs flex flex-col justify-between">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Jerarquía Super Admin</span>
-                <span class="px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">Nivel 1</span>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Administrador</span>
+                <span class="px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200">Rol Admin</span>
               </div>
               <div class="mt-3">
-                <div class="text-xl font-extrabold text-brand-black" id="statSuperAdmins">1 Super Admin</div>
-                <span class="text-[10px] text-slate-400 mt-0.5 block">Control Global Holding nuam</span>
+                <div class="text-xl font-extrabold text-brand-black" id="statSuperAdmins">1 Administrador</div>
+                <span class="text-[10px] text-slate-400 mt-0.5 block">Control Global Holding</span>
               </div>
             </div>
 
             <div class="bg-white p-5 rounded-3xl border border-brand-border shadow-xs flex flex-col justify-between">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Administradores Mesa</span>
-                <span class="px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-blue-50 text-blue-800 border border-blue-200">Nivel 2</span>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Operadores</span>
+                <span class="px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200">Rol Operador</span>
               </div>
               <div class="mt-3">
-                <div class="text-xl font-extrabold text-brand-black" id="statAdminsMesa">1 Admin Mesa</div>
-                <span class="text-[10px] text-slate-400 mt-0.5 block">Gestión por Corredora</span>
+                <div class="text-xl font-extrabold text-brand-black" id="statAdminsMesa">2 Operadores</div>
+                <span class="text-[10px] text-slate-400 mt-0.5 block">Mesa y Carga Masiva</span>
               </div>
             </div>
 
             <div class="bg-white p-5 rounded-3xl border border-brand-border shadow-xs flex flex-col justify-between">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Operadores & Auditores</span>
-                <span class="px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200">Nivel 3 y 4</span>
+                <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Auditor</span>
+                <span class="px-2 py-0.5 rounded-md text-[9px] font-extrabold bg-purple-50 text-purple-800 border border-purple-200">Rol Auditor</span>
               </div>
               <div class="mt-3">
-                <div class="text-xl font-extrabold text-brand-black" id="statOperadoresAuditores">2 Operativos</div>
-                <span class="text-[10px] text-slate-400 mt-0.5 block">Ingesta & Fiscalización CMF</span>
+                <div class="text-xl font-extrabold text-brand-black" id="statOperadoresAuditores">1 Auditor</div>
+                <span class="text-[10px] text-slate-400 mt-0.5 block">Fiscalización CMF</span>
               </div>
             </div>
 
@@ -770,24 +771,24 @@
             
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
               <div>
-                <h2 class="text-base font-bold text-brand-black">Cuentas Institucionales y Rangos Bursátiles</h2>
-                <p class="text-xs text-slate-400 mt-0.5">Control de privilegios por Corredora de Bolsa participante y Holding nuam</p>
+                <h2 class="text-base font-bold text-brand-black">Cuentas Institucionales y Roles de Acceso</h2>
+                <p class="text-xs text-slate-400 mt-0.5">Gestión centralizada de perfiles y permisos (Exclusivo Administrador)</p>
               </div>
 
               <div class="flex flex-wrap items-center gap-2">
-                <!-- Filtros de Rango -->
+                <!-- Filtros de Rol -->
                 <div class="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
                   <button onclick="filtrarUsuariosRango('TODOS')" id="filtroUsrTodos" class="px-3 py-1.5 rounded-lg bg-white shadow-2xs font-bold text-brand-black">Todos</button>
-                  <button onclick="filtrarUsuariosRango('SUPER_ADMIN')" id="filtroUsrSuper" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Super Admin</button>
-                  <button onclick="filtrarUsuariosRango('ADMIN_CORREDORA')" id="filtroUsrAdmin" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Admins</button>
-                  <button onclick="filtrarUsuariosRango('OPERADOR_SENIOR')" id="filtroUsrOp" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Operadores</button>
-                  <button onclick="filtrarUsuariosRango('AUDITOR_CMF')" id="filtroUsrAuditor" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Auditores</button>
+                  <button onclick="filtrarUsuariosRango('SUPER_ADMIN')" id="filtroUsrSuper" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Administrador</button>
+                  <button onclick="filtrarUsuariosRango('OPERADOR_SENIOR')" id="filtroUsrOp" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Operador</button>
+                  <button onclick="filtrarUsuariosRango('AUDITOR_CMF')" id="filtroUsrAuditor" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Auditor</button>
+                  <button onclick="filtrarUsuariosRango('ADMIN_CORREDORA')" id="filtroUsrAdmin" class="hidden">Admin Corredora</button>
                 </div>
 
                 <!-- Botón Crear Usuario -->
                 <button id="btnCrearUsuario" onclick="abrirModalUsuario()" class="px-4 py-2 bg-brand-black hover:bg-black text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center space-x-2">
                   <i data-lucide="user-plus" class="w-3.5 h-3.5 text-brand-orange"></i>
-                  <span>Crear Cuenta / Asignar Rango</span>
+                  <span>Crear Cuenta / Asignar Rol</span>
                 </button>
               </div>
             </div>
@@ -1037,12 +1038,11 @@
             </select>
           </div>
           <div>
-            <label class="block font-bold text-slate-700 mb-1">Rango / Jerarquía *</label>
+            <label class="block font-bold text-slate-700 mb-1">Rol Asignado *</label>
             <select id="formUsuarioRango" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-1 focus:ring-brand-black focus:outline-none font-semibold cursor-pointer">
-              <option value="SUPER_ADMIN">Super Admin (Nivel 1 - Control Total)</option>
-              <option value="ADMIN_CORREDORA">Admin Corredora (Nivel 2 - Jefe Mesa)</option>
-              <option value="OPERADOR_SENIOR" selected>Operador Senior (Nivel 3 - Ingesta/Edición)</option>
-              <option value="AUDITOR_CMF">Auditor CMF (Nivel 4 - Solo Lectura)</option>
+              <option value="SUPER_ADMIN">Administrador (Control Total & Usuarios)</option>
+              <option value="OPERADOR_SENIOR" selected>Operador (Carga y Gestión de Cartera)</option>
+              <option value="AUDITOR_CMF">Auditor (Fiscalización Solo Lectura)</option>
             </select>
           </div>
         </div>
