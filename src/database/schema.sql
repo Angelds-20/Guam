@@ -1,10 +1,9 @@
--- ==============================================================================
 -- MODELO DE DATOS RELACIONAL (3FN) - nuam exchange
 -- Se conserva el esquema normalizado existente; se añade el modelo de autenticación
 -- (password_hash, rol, permissions, activo) y la tabla de auditoría.
 -- Las tablas se crean con IF NOT EXISTS; la evolución de columnas se gestiona
 -- de forma idempotente en migrate.js mediante PRAGMA user_version.
--- ==============================================================================
+
 
 -- 1. Corredoras participantes (aislamiento multi-tenant)
 CREATE TABLE IF NOT EXISTS corredoras (

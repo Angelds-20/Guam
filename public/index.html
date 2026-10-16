@@ -72,9 +72,7 @@
 </head>
 <body class="p-3 sm:p-5 lg:p-6 min-h-screen flex flex-col items-center justify-center">
 
-  <!-- ========================================================================= -->
-  <!-- VISTA 1: LANDING PAGE & PRESENTACIÓN INSTITUCIONAL CON LOGIN B2B -->
-  <!-- ========================================================================= -->
+  <!-- Vista 1: Landing Page y Presentación Institucional con Login B2B -->
   <div id="vistaLanding" class="w-full max-w-[1540px] bg-[#F7F8FA] rounded-[32px] shadow-2xl border border-white/80 overflow-hidden flex flex-col min-h-[92vh] animate-fadeIn">
     
     <!-- Header de la Landing -->
@@ -210,9 +208,7 @@
 
   </div>
 
-  <!-- ========================================================================= -->
-  <!-- VISTA 2: INTRANET B2B COMPLETA (PROTEGIDA TRAS LOGIN) -->
-  <!-- ========================================================================= -->
+  <!-- Vista 2: Intranet B2B (protegida tras login) -->
   <div id="vistaIntranet" class="hidden w-full max-w-[1540px] bg-[#F7F8FA] rounded-[32px] shadow-2xl border border-white/80 overflow-hidden min-h-[94vh]" style="display: none;">
 
     <!-- 1. NAVBAR HORIZONTAL SUPERIOR (INTRANET) -->
@@ -296,9 +292,7 @@
 
     </header>
 
-    <!-- ========================================================================= -->
-    <!-- 2. ÁREA DE TRABAJO PRINCIPAL (HERO AMPLIO + CONTENIDO MULTI-PANEL) -->
-    <!-- ========================================================================= -->
+    <!-- Área de trabajo principal -->
     <div class="flex-grow flex flex-col overflow-hidden">
 
       <!-- ALERTA GLOBAL TOAST -->
@@ -321,14 +315,10 @@
         <span id="badgeRestriccionRol" class="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded"></span>
       </div>
 
-      <!-- ========================================================================= -->
-      <!-- CONTENIDO MULTI-PANEL DINÁMICO -->
-      <!-- ========================================================================= -->
+      <!-- Contenido multi-panel dinámico -->
       <main class="flex-grow p-6 overflow-y-auto space-y-6">
 
-        <!-- ======================================================================= -->
-        <!-- SECCIÓN 1: VISTA PRINCIPAL (GRILLA + WIDGETS DERECHA E INFERIOR) -->
-        <!-- ======================================================================= -->
+        <!-- Sección 1: Vista principal (grilla y widgets) -->
         <div id="seccionCalificaciones" class="space-y-5">
           
           <!-- ENCABEZADO MINIMALISTA DE CALIFICACIONES -->
@@ -431,9 +421,7 @@
 
         </div>
 
-        <!-- ======================================================================= -->
-        <!-- SECCIÓN 2: VISTA DE CARGA MASIVA COMPLETA (PANTALLA COMPLETA) -->
-        <!-- ======================================================================= -->
+        <!-- Sección 2: Carga masiva -->
         <div id="seccionCargaMasiva" class="hidden space-y-6">
           <div class="bg-white rounded-3xl p-7 border border-brand-border shadow-sm space-y-6">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
@@ -528,9 +516,7 @@
           </div>
         </div>
 
-        <!-- ======================================================================= -->
-        <!-- SECCIÓN 3: VISTA DE AUDITORÍA COMPLETA (TABLA FULL) -->
-        <!-- ======================================================================= -->
+        <!-- Sección 3: Auditoría -->
         <div id="seccionAuditoria" class="hidden space-y-6">
           <div class="bg-white rounded-3xl p-6 border border-brand-border shadow-sm">
             <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
@@ -562,9 +548,7 @@
           </div>
         </div>
 
-        <!-- ======================================================================= -->
-        <!-- SECCIÓN 4: VISTA DE BOLSA CENTRAL (CATÁLOGO FULL) -->
-        <!-- ======================================================================= -->
+        <!-- Sección 4: Catálogo Bolsa Central -->
         <div id="seccionBolsaCentral" class="hidden space-y-6">
           <!-- Catálogo de Instrumentos Oficiales -->
           <div class="bg-white rounded-3xl p-6 border border-brand-border shadow-sm">
@@ -583,9 +567,7 @@
           </div>
         </div>
 
-        <!-- ======================================================================= -->
-        <!-- SECCIÓN 5: PANEL DE ADMINISTRACIÓN DE CUENTAS, PERFILES Y RANGOS (RBAC) -->
-        <!-- ======================================================================= -->
+        <!-- Sección 5: Administración de usuarios y roles (RBAC) -->
         <div id="seccionUsuarios" class="hidden space-y-6">
           
           <!-- Bento Header de Control de Accesos y Rangos -->
@@ -715,9 +697,7 @@
 
   </div>
 
-  <!-- ========================================================================= -->
-  <!-- MODAL: REGISTRAR / EDITAR CALIFICACIÓN (CON VALIDADOR EN TIEMPO REAL) -->
-  <!-- ========================================================================= -->
+  <!-- Modal: Registrar / editar calificación -->
   <div id="modalCalificacion" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
     <div class="bg-white rounded-[28px] shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 animate-fadeIn">
       
@@ -859,9 +839,7 @@
     </div>
   </div>
 
-  <!-- ========================================================================= -->
-  <!-- MODAL: CREAR / EDITAR USUARIO Y RANGOS (RBAC) -->
-  <!-- ========================================================================= -->
+  <!-- Modal: Crear / editar usuario (RBAC) -->
   <div id="modalUsuario" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
     <div class="bg-white rounded-[28px] shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200 animate-fadeIn">
       

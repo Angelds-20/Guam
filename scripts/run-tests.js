@@ -1,13 +1,13 @@
 /**
- * BATERÍA DE PRUEBAS AUTOMATIZADAS - nuam exchange
- * =============================================================================
+ * Batería de pruebas automatizadas - nuam exchange
+ *
  * Pruebas funcionales sobre la API REST y la lógica de negocio:
  *  - Inicio de sesión válido e inválido.
  *  - Bloqueo por límite de intentos (HTTP 429).
  *  - Denegación RBAC (HTTP 403).
  *  - Ingesta masiva transaccional sin contaminar la base de datos.
  *
- * Los tests operan sobre una base SQLite TEMPORAL independiente (se elimina al
+ * Los tests operan sobre una base SQLite temporal independiente (se elimina al
  * final), de modo que nunca modifican los datos de producción.
  */
 
@@ -48,9 +48,7 @@ async function ejecutar(nombre, fn) {
 }
 
 (async () => {
-  console.log('===============================================================');
-  console.log('🧪 BATERÍA DE PRUEBAS - nuam exchange (API REST + RBAC + Ingesta)');
-  console.log('===============================================================\n');
+  console.log('\nPruebas automatizadas: nuam exchange (API REST + RBAC + Ingesta)\n');
 
   // Iniciar el servidor en un puerto efímero con base de datos temporal.
   const server = start(0);
@@ -76,9 +74,7 @@ async function ejecutar(nombre, fn) {
     return { status: res.status, json, text, headers: res.headers };
   }
 
-  // =====================================================================
-  // 1. LÓGICA DE NEGOCIO: REGLA FISCAL Y PARSING
-  // =====================================================================
+  // 1. Lógica de negocio: regla fiscal y parsing
   await ejecutar('PRU-01: Regla fiscal válida (suma 0.80)', () => {
     const r = tributarioService.validarReglaFiscal({ f08: 0.5, f09: 0.2, f13: 0.1 });
     assert.strictEqual(r.valida, true);
@@ -122,9 +118,7 @@ async function ejecutar(nombre, fn) {
     );
   });
 
-  // =====================================================================
-  // 2. AISLAMIENTO MULTI-TENANT
-  // =====================================================================
+  // 2. Aislamiento multi-tenant
   await ejecutar('PRU-07: Aislamiento estricto por corredora (tenant)', () => {
     const lv = tributarioService.obtenerCalificaciones('corr-lv-01');
     const bc = tributarioService.obtenerCalificaciones('corr-bc-02');
@@ -140,9 +134,7 @@ async function ejecutar(nombre, fn) {
     assert.ok(todas.length > lv.length);
   });
 
-  // =====================================================================
-  // 3. INGESTA MASIVA TRANSACCIONAL (sin contaminar la base de datos)
-  // =====================================================================
+  // 3. Ingesta masiva transaccional (sin contaminar la base de datos)
   await ejecutar('PRU-09: Ingesta masiva aplica solo registros válidos (transaccional)', () => {
     const tenant = 'corr-bc-02';
     const antes = tributarioService.obtenerCalificaciones(tenant).length;
@@ -183,9 +175,7 @@ async function ejecutar(nombre, fn) {
     assert.ok(csvRechazos.includes('96.555.120-5'));
   });
 
-  // =====================================================================
-  // 4. AUTENTICACIÓN Y LÍMITE DE INTENTOS
-  // =====================================================================
+  // 4. Autenticación y límite de intentos
   let tokenAdmin = null;
   let tokenOperador = null;
 
@@ -245,9 +235,7 @@ async function ejecutar(nombre, fn) {
     assert.strictEqual(r.json.error.code, 'AUTH_REQUIRED');
   });
 
-  // =====================================================================
-  // 5. CONTROL DE ACCESO RBAC
-  // =====================================================================
+  // 5. Control de acceso RBAC
   await ejecutar('PRU-15: Operador inicia sesión correctamente', async () => {
     const r = await http('/api/auth/login', {
       method: 'POST',
@@ -289,9 +277,7 @@ async function ejecutar(nombre, fn) {
     assert.ok(todas.json.data.length > soloLv.json.data.length);
   });
 
-  // =====================================================================
-  // 6. CARGA MASIVA POR HTTP (multipart/form-data)
-  // =====================================================================
+  // 6. Carga masiva por HTTP (multipart/form-data)
   await ejecutar('PRU-20: Carga masiva vía HTTP (multipart) responde correctamente', async () => {
     const csv = [
       'rut_cliente,razon_social,nemotecnico,periodo_fiscal,modalidad,valor_nominal,no_inscrito,f08,f09,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19',
@@ -312,9 +298,7 @@ async function ejecutar(nombre, fn) {
     assert.strictEqual(r.json.data.rechazados, 0);
   });
 
-  // =====================================================================
-  // 7. PRUEBAS DE CONTRATO FRONTEND Y CONSISTENCIA DE ROLES (PREVENCIÓN DE REGRESIONES)
-  // =====================================================================
+  // 7. Pruebas de contrato frontend y consistencia de roles (prevención de regresiones)
   await ejecutar('PRU-21: Verificación estática de rutas cliente en public/app.js', async () => {
     const appJsPath = path.join(__dirname, '..', 'public', 'app.js');
     const appJsContent = fs.readFileSync(appJsPath, 'utf8');
@@ -497,10 +481,8 @@ async function ejecutar(nombre, fn) {
     assert.strictEqual(rDel.json.success, true);
   });
 
-  // =====================================================================
-  // CIERRE Y LIMPIEZA
-  // =====================================================================
-  console.log('\n  🧹 Liberando recursos de prueba...');
+  // Cierre y limpieza
+  console.log('\n  Liberando recursos de prueba...');
   server.close();
   closeDb();
   try {
@@ -509,9 +491,7 @@ async function ejecutar(nombre, fn) {
     /* la carpeta temporal puede quedar si el sistema la bloquea */
   }
 
-  console.log('===============================================================');
-  console.log(`📊 RESULTADOS: ${aprobadas} Aprobadas | ${fallidas} Fallidas`);
-  console.log('===============================================================\n');
+  console.log(`\nResultados: ${aprobadas} Aprobadas | ${fallidas} Fallidas\n`);
 
   process.exit(fallidas > 0 ? 1 : 0);
 })();

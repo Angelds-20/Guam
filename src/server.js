@@ -21,9 +21,7 @@ const { fail } = require('./utils/response');
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// ---------------------------------------------------------------------------
 // Middlewares globales
-// ---------------------------------------------------------------------------
 app.disable('x-powered-by');
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
@@ -52,9 +50,7 @@ app.use('/api', (req, res, next) => {
 // Frontend estático (desacoplado de la API).
 app.use(express.static(path.join(__dirname, '..', 'public'), { etag: false, maxAge: 0 }));
 
-// ---------------------------------------------------------------------------
 // API REST
-// ---------------------------------------------------------------------------
 app.use('/api', apiRoutes);
 
 // Recurso no encontrado.
@@ -68,9 +64,7 @@ app.use((req, res) => {
 // Manejador global de errores (siempre al final).
 app.use(errorHandler);
 
-// ---------------------------------------------------------------------------
 // Inicio del servidor
-// ---------------------------------------------------------------------------
 function start(port = PORT) {
   inicializarBaseDeDatos();
   const server = app.listen(port, () => {

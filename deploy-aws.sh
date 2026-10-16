@@ -1,8 +1,7 @@
 #!/bin/bash
-# ==============================================================================
-# SCRIPT DE DESPLIEGUE AUTOMATIZADO EN AWS EC2 (AWS ACADEMY)
+# Script de despliegue en AWS EC2 (Amazon Linux 2023)
 # Sistema: nuam exchange - Mantenedor de Calificaciones Tributarias
-# ==============================================================================
+
 
 set -e
 
@@ -65,16 +64,14 @@ fi
 pm2 save
 
 echo ""
-echo "=============================================================================="
-echo "✅ DESPLIEGUE EN AWS EC2 COMPLETADO CON ÉXITO Y BLINDADO ANTE REINICIOS"
+echo "Estado del despliegue en AWS EC2:"
 IMDS_TOKEN=$(curl -s --connect-timeout 2 -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
 if [ -n "$IMDS_TOKEN" ]; then
     PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "54.165.130.63")
 else
     PUBLIC_IP=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "54.165.130.63")
 fi
-echo "🌐 Acceso web estándar (Puerto 80):   http://${PUBLIC_IP}/"
-echo "🔄 Persistencia: Servicio systemd 'pm2-$CURRENT_USER' y 'nginx' habilitados"
-echo "🔍 Monitoreo y logs en vivo:          pm2 logs nuam-app"
-echo "=============================================================================="
+echo "Acceso web: http://${PUBLIC_IP}/"
+echo "Persistencia: Servicio systemd 'pm2-$CURRENT_USER' y 'nginx' habilitados"
+echo "Monitoreo:    pm2 logs nuam-app"
 

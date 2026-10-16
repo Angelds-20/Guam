@@ -372,11 +372,9 @@ function aplicarRestriccionesPorRol() {
     }
   }
 
-  // 2. VISTAS PERSONALIZADAS SEGÚN EL ROL
+  // 2. Vistas personalizadas según el rol
   if (esAuditor) {
-    // ==========================================
-    // VISTA DEL AUDITOR / REGULADOR (Fiscalización y Consulta)
-    // ==========================================
+    // Vista del auditor / regulador (fiscalización y consulta)
     if (navCalTexto) navCalTexto.textContent = 'Inspección de Carteras';
     if (navCarga) navCarga.classList.add('hidden'); // El auditor no sube archivos
     if (navAuditoria) navAuditoria.classList.remove('hidden'); // Su herramienta clave
@@ -419,9 +417,7 @@ function aplicarRestriccionesPorRol() {
     }
 
   } else if (!esAdmin) {
-    // ==========================================
-    // VISTA DEL OPERADOR (Mesa de Trabajo Operativa)
-    // ==========================================
+    // Vista del operador (mesa de trabajo operativa)
     if (navCalTexto) navCalTexto.textContent = 'Mis Calificaciones';
     if (navCarga) navCarga.classList.remove('hidden'); // Ingesta masiva activa
     if (navAuditoria) navAuditoria.classList.add('hidden'); // Oculto: no compete a operación diaria
@@ -459,9 +455,7 @@ function aplicarRestriccionesPorRol() {
     if (banner) banner.classList.add('hidden');
 
   } else {
-    // ==========================================
-    // VISTA DEL ADMINISTRADOR (Control Total)
-    // ==========================================
+    // Vista del administrador (control total)
     if (navCalTexto) navCalTexto.textContent = 'Calificaciones';
     if (navCarga) navCarga.classList.remove('hidden');
     if (navAuditoria) navAuditoria.classList.remove('hidden');
@@ -1395,9 +1389,7 @@ function cerrarAlerta() {
   if (box) box.classList.add('hidden');
 }
 
-// =========================================================================
-// MÓDULO: GESTIÓN DE USUARIOS, ROLES Y RANGOS INSTITUCIONALES (RBAC)
-// =========================================================================
+// Gestión de usuarios, roles y rangos institucionales (RBAC)
 
 async function cargarUsuarios() {
   try {
