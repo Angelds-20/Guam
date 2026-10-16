@@ -1,272 +1,517 @@
 /**
  * BATERÍA DE PRUEBAS AUTOMATIZADAS - nuam exchange
- * Ejecuta pruebas unitarias y de integración sobre los módulos críticos.
- * 
- * IMPORTANTE: Los tests operan sobre snapshots del estado y restauran
- * el estado original al finalizar para no contaminar datos de producción.
+ * =============================================================================
+ * Pruebas funcionales sobre la API REST y la lógica de negocio:
+ *  - Inicio de sesión válido e inválido.
+ *  - Bloqueo por límite de intentos (HTTP 429).
+ *  - Denegación RBAC (HTTP 403).
+ *  - Ingesta masiva transaccional sin contaminar la base de datos.
+ *
+ * Los tests operan sobre una base SQLite TEMPORAL independiente (se elimina al
+ * final), de modo que nunca modifican los datos de producción.
  */
 
-const assert = require('assert');
+'use strict';
+
+// Configurar el entorno de prueba ANTES de cargar la aplicación: connection.js
+// resuelve la ruta de la base de datos al importarse.
+process.env.NODE_ENV = 'test';
+process.env.JWT_SECRET = 'nuam-test-secret';
+process.env.SEED_DEFAULT_PASSWORD = 'Nuam2026!';
+
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
+const assert = require('assert');
 
-// Guardar estado original de auditoría antes de que los módulos lo carguen
-const AUDIT_FILE = path.join(__dirname, '..', 'src', 'data', 'auditoria_eventos.json');
-const auditoriaOriginal = fs.readFileSync(AUDIT_FILE, 'utf8');
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nuam-tests-'));
+process.env.SQLITE_FILE = path.join(tmpDir, 'nuam_test.sqlite');
 
+const { start } = require('../src/server');
+const { closeDb } = require('../src/database/connection');
 const tributarioService = require('../src/services/tributarioService');
-const { corredoras, calificaciones, bitacoraAuditoria, restaurarBaseDatosCompleta } = require('../src/models/dataStore');
 
-// Asegurar que SQLite y memoria comiencen en estado oficial limpio
-restaurarBaseDatosCompleta();
-
-// Guardar snapshot del estado de calificaciones antes de los tests
-const calificacionesSnapshot = JSON.parse(JSON.stringify(calificaciones));
-const auditoriaLengthInicial = bitacoraAuditoria.length;
-
-console.log('===============================================================');
-console.log('🧪 EJECUTANDO BATERÍA DE PRUEBAS UNITARIAS E INTEGRACIÓN (nuam)');
-console.log('===============================================================\n');
+const USUARIO_QA = { id: 'usr-qa', email: 'qa@nuam.exchange' };
 
 let aprobadas = 0;
 let fallidas = 0;
 
-function test(nombre, fn) {
+async function ejecutar(nombre, fn) {
   try {
-    fn();
+    await fn();
     console.log(`  ✅ [PASS] ${nombre}`);
     aprobadas++;
   } catch (err) {
-    console.error(`  ❌ [FAIL] ${nombre}:`, err.message);
+    console.error(`  ❌ [FAIL] ${nombre}:`, err && err.message ? err.message : err);
     fallidas++;
   }
 }
 
-// 1. REGLA FISCAL F8..F19 <= 1.0
-test('PRU-01: Suma de factores <= 1.0 válida (0.80)', () => {
-  const factores = { f08: 0.50, f09: 0.20, f13: 0.10 };
-  const res = tributarioService.validarReglaFiscal(factores);
-  assert.strictEqual(res.valida, true);
-  assert.strictEqual(res.sumaTotal, 0.80);
-});
+(async () => {
+  console.log('===============================================================');
+  console.log('🧪 BATERÍA DE PRUEBAS - nuam exchange (API REST + RBAC + Ingesta)');
+  console.log('===============================================================\n');
 
-test('PRU-02: Suma de factores exactamente 1.0 válida', () => {
-  const factores = { f08: 0.50, f09: 0.50 };
-  const res = tributarioService.validarReglaFiscal(factores);
-  assert.strictEqual(res.valida, true);
-  assert.strictEqual(res.sumaTotal, 1.00);
-});
+  // Iniciar el servidor en un puerto efímero con base de datos temporal.
+  const server = start(0);
+  await new Promise((resolve) => server.once('listening', resolve));
+  const port = server.address().port;
+  const base = `http://127.0.0.1:${port}`;
 
-test('PRU-03: Suma de factores > 1.0 rechazada con error (1.05)', () => {
-  const factores = { f08: 0.60, f09: 0.30, f10: 0.15 };
-  const res = tributarioService.validarReglaFiscal(factores);
-  assert.strictEqual(res.valida, false);
-  assert.strictEqual(res.sumaTotal, 1.05);
-  assert.ok(res.error.includes('Violación de regla fiscal'));
-});
-
-test('PRU-04: Factor negativo rechazado', () => {
-  const factores = { f08: -0.10, f09: 0.50 };
-  const res = tributarioService.validarReglaFiscal(factores);
-  assert.strictEqual(res.valida, false);
-  assert.ok(res.error.includes('no puede ser negativo'));
-});
-
-// 2. AISLAMIENTO MULTITENANT
-test('PRU-05: Aislamiento estricto por Corredora (Tenant ID)', () => {
-  const tenant1 = corredoras[0].id;
-  const tenant2 = corredoras[1].id;
-  const datosT1 = tributarioService.obtenerCalificaciones(tenant1);
-  const datosT2 = tributarioService.obtenerCalificaciones(tenant2);
-
-  assert.ok(datosT1.every(c => c.tenant_id === tenant1));
-  assert.ok(datosT2.every(c => c.tenant_id === tenant2));
-  assert.notStrictEqual(datosT1.length, 0);
-  assert.notStrictEqual(datosT2.length, 0);
-});
-
-test('PRU-06: Tenant inexistente retorna lista vacía', () => {
-  const datos = tributarioService.obtenerCalificaciones('corr-inexistente-99');
-  assert.strictEqual(datos.length, 0);
-});
-
-// 3. OPERACIONES CRUD INDIVIDUALES
-test('PRU-07: Creación individual con factores válidos', () => {
-  const tenantId = corredoras[0].id;
-  const payload = {
-    rut_cliente: '99.999.888-7',
-    razon_social: 'Test Inversiones Limitada',
-    nemotecnico: 'CMPC',
-    periodo_fiscal: 2026,
-    modalidad: 'FACTOR',
-    valor_nominal: 5000000,
-    factores: { f08: 0.40, f09: 0.20, f13: 0.10 }
-  };
-  const creada = tributarioService.crearCalificacion(tenantId, payload, 'test@corredora.cl');
-  assert.strictEqual(creada.rut_cliente, '99.999.888-7');
-  assert.strictEqual(creada.suma_factores, 0.70);
-});
-
-test('PRU-08: Bloqueo de creación si factores exceden 1.0', () => {
-  const tenantId = corredoras[0].id;
-  const payload = {
-    rut_cliente: '88.888.777-6',
-    nemotecnico: 'BCI',
-    periodo_fiscal: 2026,
-    factores: { f08: 0.80, f09: 0.30 } // Suma = 1.10
-  };
-  assert.throws(() => {
-    tributarioService.crearCalificacion(tenantId, payload);
-  }, /Violación de regla fiscal/);
-});
-
-test('PRU-09: Bloqueo de creación sin campos obligatorios', () => {
-  const tenantId = corredoras[0].id;
-  assert.throws(() => {
-    tributarioService.crearCalificacion(tenantId, { rut_cliente: '11.111.111-1' });
-  }, /obligatorios/);
-});
-
-// 4. LÓGICA DE INGESTA MASIVA (UPSERT) Y LOG DE RECHAZOS
-test('PRU-10: Ingesta Masiva con Upsert (Insert + Update + Aislamiento de Rechazos)', () => {
-  const tenantId = corredoras[0].id;
-  const csvContent = `rut_cliente,razon_social,nemotecnico,periodo_fiscal,modalidad,valor_nominal,f08,f09,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19
-96.555.120-4,"Inversiones Santa Blanca S.A.",CHILE,2026,FACTOR,20000000,0.40,0.20,0.10,0.05,0.00,0.15,0.00,0.00,0.00,0.00,0.00,0.00
-55.444.333-2,"Nuevo Cliente Uno",ENELAM,2026,FACTOR,8000000,0.30,0.20,0.10,0.00,0.00,0.10,0.00,0.00,0.00,0.00,0.00,0.00
-66.555.444-1,"Cliente Invalido",FALABELLA,2026,FACTOR,1000000,0.70,0.40,0.10,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00
-`;
-  const buffer = Buffer.from(csvContent, 'utf-8');
-  const resultado = tributarioService.procesarCargaMasiva(tenantId, buffer, 'test.csv', 'qa@redtech.cl');
-
-  assert.strictEqual(resultado.totalLeidos, 3);
-  assert.strictEqual(resultado.actualizados, 1); // 96.555.120-4 ya existía en seed data
-  assert.strictEqual(resultado.insertados, 1);    // 55.444.333-2 es nuevo
-  assert.strictEqual(resultado.rechazados, 1);     // 66.555.444-1 suma 1.20 > 1.0
-
-  // Comprobar generación de CSV de rechazos
-  const csvRechazos = tributarioService.generarCsvRechazos(resultado.batchId);
-  assert.ok(csvRechazos.includes('66.555.444-1'));
-  assert.ok(csvRechazos.includes('Violación de regla fiscal'));
-});
-
-test('PRU-11: Ingesta masiva rechaza filas sin RUT o Nemotécnico', () => {
-  const tenantId = corredoras[0].id;
-  const csvContent = `rut_cliente,nemotecnico,periodo_fiscal,f08
-,"SIN_RUT",2026,0.50
-99.000.111-2,,2026,0.30
-`;
-  const buffer = Buffer.from(csvContent, 'utf-8');
-  const resultado = tributarioService.procesarCargaMasiva(tenantId, buffer, 'test_invalido.csv', 'qa@redtech.cl');
-  assert.strictEqual(resultado.rechazados, 2);
-  assert.strictEqual(resultado.insertados, 0);
-});
-
-// 5. VALIDACIÓN DE ESTRUCTURA DE DATOS SEMILLA
-test('PRU-12: Datos semilla tienen factores que suman correctamente', () => {
-  for (const cal of calificacionesSnapshot) {
-    const validacion = tributarioService.validarReglaFiscal(cal.factores);
-    assert.strictEqual(validacion.valida, true, `Semilla ${cal.rut_cliente} tiene suma inválida: ${validacion.sumaTotal}`);
-    assert.strictEqual(validacion.sumaTotal, cal.suma_factores, `Semilla ${cal.rut_cliente}: suma calculada ${validacion.sumaTotal} != declarada ${cal.suma_factores}`);
+  async function http(pathname, opts = {}) {
+    const headers = {};
+    if (opts.token) headers.authorization = `Bearer ${opts.token}`;
+    if (opts.ip) headers['x-forwarded-for'] = opts.ip;
+    let body;
+    if (opts.json !== undefined) {
+      headers['content-type'] = 'application/json';
+      body = JSON.stringify(opts.json);
+    } else if (opts.form) {
+      body = opts.form;
+    }
+    const res = await fetch(base + pathname, { method: opts.method || 'GET', headers, body });
+    const text = await res.text();
+    let json = null;
+    try { json = JSON.parse(text); } catch { /* respuesta no JSON (descarga de archivo) */ }
+    return { status: res.status, json, text, headers: res.headers };
   }
-});
 
-// 6. TOLERANCIA A FORMATOS DE EXCEL EN ESPAÑOL Y GENERACIÓN DE ARCHIVOS
-test('PRU-13: parsearNumero tolera formato latinoamericano (coma decimal y punto de miles)', () => {
-  assert.strictEqual(tributarioService.parsearNumero('0,35'), 0.35);
-  assert.strictEqual(tributarioService.parsearNumero('0.35'), 0.35);
-  assert.strictEqual(tributarioService.parsearNumero('15.400.000'), 15400000);
-  assert.strictEqual(tributarioService.parsearNumero('15.400.000,50'), 15400000.5);
-  assert.strictEqual(tributarioService.parsearNumero('15,400,000.50'), 15400000.5);
-  assert.strictEqual(tributarioService.parsearNumero(25000), 25000);
-});
+  // =====================================================================
+  // 1. LÓGICA DE NEGOCIO: REGLA FISCAL Y PARSING
+  // =====================================================================
+  await ejecutar('PRU-01: Regla fiscal válida (suma 0.80)', () => {
+    const r = tributarioService.validarReglaFiscal({ f08: 0.5, f09: 0.2, f13: 0.1 });
+    assert.strictEqual(r.valida, true);
+    assert.strictEqual(r.sumaTotal, 0.8);
+  });
 
-test('PRU-14: Ingesta masiva procesa archivo Excel (.xlsx) nativo con formato en español', () => {
-  const xlsx = require('xlsx');
-  const tenantId = corredoras[0].id;
+  await ejecutar('PRU-02: Regla fiscal en el límite (suma 1.00)', () => {
+    const r = tributarioService.validarReglaFiscal({ f08: 0.5, f09: 0.5 });
+    assert.strictEqual(r.valida, true);
+    assert.strictEqual(r.sumaTotal, 1);
+  });
 
-  const dataExcel = [
-    ['RUT Cliente', 'Razón Social', 'Nemotécnico', 'Período Fiscal', 'Modalidad', 'Valor Nominal', 'No Inscrito', 'F08', 'F09', 'F10', 'F11', 'F12', 'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19'],
-    ['11.222.333-4', 'Sociedad Prueba Excel SpA', 'CHILE', 2026, 'FACTOR', '18.500.000', 'NO', '0,30', '0,20', '0,10', '0,05', '0,00', '0,15', '0,00', '0,00', '0,00', '0,00', '0,00', '0,00']
-  ];
+  await ejecutar('PRU-03: Regla fiscal violada (suma 1.05)', () => {
+    const r = tributarioService.validarReglaFiscal({ f08: 0.6, f09: 0.3, f10: 0.15 });
+    assert.strictEqual(r.valida, false);
+    assert.ok(r.error.includes('Violación de regla fiscal'));
+  });
 
-  const wb = xlsx.utils.book_new();
-  const ws = xlsx.utils.aoa_to_sheet(dataExcel);
-  xlsx.utils.book_append_sheet(wb, ws, 'Datos');
-  const bufferExcel = xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  await ejecutar('PRU-04: Factor negativo rechazado', () => {
+    const r = tributarioService.validarReglaFiscal({ f08: -0.1, f09: 0.5 });
+    assert.strictEqual(r.valida, false);
+    assert.ok(r.error.includes('no puede ser negativo'));
+  });
 
-  const res = tributarioService.procesarCargaMasiva(tenantId, bufferExcel, 'prueba_espanol.xlsx', 'test@redtech.cl');
-  assert.strictEqual(res.totalLeidos, 1);
-  assert.strictEqual(res.rechazados, 0);
-  assert.strictEqual(res.insertados, 1);
+  await ejecutar('PRU-05: parsearNumero tolera formato latinoamericano', () => {
+    assert.strictEqual(tributarioService.parsearNumero('0,35'), 0.35);
+    assert.strictEqual(tributarioService.parsearNumero('15.400.000'), 15400000);
+    assert.strictEqual(tributarioService.parsearNumero('15.400.000,50'), 15400000.5);
+    assert.strictEqual(tributarioService.parsearNumero('15,400,000.50'), 15400000.5);
+  });
 
-  // Verificar que el registro insertado parseó correctamente el monto y los factores con comas
-  const insertado = tributarioService.obtenerCalificaciones(tenantId, '11.222.333-4')[0];
-  assert.ok(insertado);
-  assert.strictEqual(insertado.valor_nominal, 18500000);
-  assert.strictEqual(insertado.suma_factores, 0.80);
-});
+  await ejecutar('PRU-06: RUT inválido es rechazado en creación individual', () => {
+    assert.throws(
+      () => tributarioService.crearCalificacion(
+        'corr-lv-01',
+        { rut_cliente: '96.555.120-5', nemotecnico: 'CMPC', periodo_fiscal: 2026 },
+        USUARIO_QA,
+        '127.0.0.1'
+      ),
+      /no es válido/
+    );
+  });
 
-test('PRU-15: generarPlantillaExcel produce buffer .xlsx válido y legible', () => {
-  const xlsx = require('xlsx');
-  const buf = tributarioService.generarPlantillaExcel();
-  assert.ok(Buffer.isBuffer(buf));
-  assert.ok(buf.length > 5000);
+  // =====================================================================
+  // 2. AISLAMIENTO MULTI-TENANT
+  // =====================================================================
+  await ejecutar('PRU-07: Aislamiento estricto por corredora (tenant)', () => {
+    const lv = tributarioService.obtenerCalificaciones('corr-lv-01');
+    const bc = tributarioService.obtenerCalificaciones('corr-bc-02');
+    assert.ok(lv.length > 0);
+    assert.ok(bc.length > 0);
+    assert.ok(lv.every((c) => c.tenant_id === 'corr-lv-01'));
+    assert.ok(bc.every((c) => c.tenant_id === 'corr-bc-02'));
+  });
 
-  const wb = xlsx.read(buf, { type: 'buffer' });
-  assert.ok(wb.SheetNames.includes('Plantilla_Calificaciones'));
-  const rows = xlsx.utils.sheet_to_json(wb.Sheets['Plantilla_Calificaciones']);
-  assert.ok(rows.length >= 4);
-});
+  await ejecutar('PRU-08: Rol global puede consultar todas las corredoras', () => {
+    const todas = tributarioService.obtenerCalificaciones(null);
+    const lv = tributarioService.obtenerCalificaciones('corr-lv-01');
+    assert.ok(todas.length > lv.length);
+  });
 
-test('PRU-16: generarLotePrueba genera lotes válidos y lotes con rechazo para demostración', () => {
-  const xlsx = require('xlsx');
+  // =====================================================================
+  // 3. INGESTA MASIVA TRANSACCIONAL (sin contaminar la base de datos)
+  // =====================================================================
+  await ejecutar('PRU-09: Ingesta masiva aplica solo registros válidos (transaccional)', () => {
+    const tenant = 'corr-bc-02';
+    const antes = tributarioService.obtenerCalificaciones(tenant).length;
 
-  // Lote válido
-  const bufValido = tributarioService.generarLotePrueba(false, 'xlsx');
-  const wbValido = xlsx.read(bufValido, { type: 'buffer' });
-  const rowsValido = xlsx.utils.sheet_to_json(wbValido.Sheets['Lote_Valido']);
-  assert.strictEqual(rowsValido.length, 4);
+    const csv = [
+      'rut_cliente,razon_social,nemotecnico,periodo_fiscal,modalidad,valor_nominal,no_inscrito,f08,f09,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19',
+      '96.888.777-7,"Banchile Administradora General de Fondos S.A.",FALABELLA,2026,FACTOR,820000000,false,0.50,0.20,0.10,0.05,0.00,0.10,0.00,0.00,0.00,0.00,0.00,0.00',
+      '76.123.456-0,"Inversiones Los Andes SpA",CHILE,2026,FACTOR,15400000,false,0.35,0.15,0.10,0.05,0.00,0.12,0.00,0.00,0.00,0.00,0.00,0.03',
+      '96.555.120-5,"Cliente Inválido",FALABELLA,2026,FACTOR,1000000,false,0.70,0.40,0.10,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00,0.00',
+    ].join('\r\n');
 
-  // Lote con rechazo intencional
-  const bufRechazo = tributarioService.generarLotePrueba(true, 'xlsx');
-  const wbRechazo = xlsx.read(bufRechazo, { type: 'buffer' });
-  const rowsRechazo = xlsx.utils.sheet_to_json(wbRechazo.Sheets['Lote_Con_Rechazo']);
-  assert.strictEqual(rowsRechazo.length, 5);
-});
+    const resultado = tributarioService.procesarCargaMasiva(
+      tenant,
+      Buffer.from(csv, 'utf-8'),
+      'carga_prueba.csv',
+      USUARIO_QA,
+      '127.0.0.1'
+    );
 
-test('PRU-17: exportarDeclaracionExcel genera archivo .xlsx con posiciones de la corredora', () => {
-  const xlsx = require('xlsx');
-  const tenantId = corredoras[0].id;
-  const buf = tributarioService.exportarDeclaracionExcel(tenantId);
-  assert.ok(Buffer.isBuffer(buf));
+    assert.strictEqual(resultado.totalLeidos, 3);
+    assert.strictEqual(resultado.actualizados, 1);
+    assert.strictEqual(resultado.insertados, 1);
+    assert.strictEqual(resultado.rechazados, 1);
 
-  const wb = xlsx.read(buf, { type: 'buffer' });
-  assert.ok(wb.SheetNames.includes('Declaracion_Consolidada'));
-  const rows = xlsx.utils.sheet_to_json(wb.Sheets['Declaracion_Consolidada']);
-  assert.ok(rows.length >= 1);
-});
+    // Verificación de no-contaminación: solo el registro válido nuevo persiste.
+    const despues = tributarioService.obtenerCalificaciones(tenant).length;
+    assert.strictEqual(despues, antes + 1);
 
-// ====================================================
-// LIMPIEZA: Restaurar estado original para no contaminar
-// ====================================================
-console.log('\n  🧹 Restaurando estado original...');
+    const nuevo = tributarioService.obtenerCalificaciones(tenant, '76.123.456-0');
+    assert.strictEqual(nuevo.length, 1);
+    assert.strictEqual(nuevo[0].nemotecnico, 'CHILE');
 
-// Restaurar SQLite y memoria al estado original de producción
-restaurarBaseDatosCompleta();
+    const rechazado = tributarioService.obtenerCalificaciones(tenant, '96.555.120');
+    assert.strictEqual(rechazado.length, 0);
 
-// Restaurar auditoría al estado previo
-bitacoraAuditoria.length = auditoriaLengthInicial;
+    // El log de rechazos identifica la fila con RUT inválido.
+    const csvRechazos = tributarioService.generarCsvRechazos(resultado.batchId);
+    assert.ok(csvRechazos.includes('96.555.120-5'));
+  });
 
-// Restaurar archivo de auditoría en disco
-try {
-  fs.writeFileSync(AUDIT_FILE, auditoriaOriginal, 'utf8');
-  console.log('  ✅ Estado restaurado correctamente (auditoría, SQLite y memoria).\n');
-} catch (err) {
-  console.error('  ⚠️  No se pudo restaurar auditoría en disco:', err.message);
-}
+  // =====================================================================
+  // 4. AUTENTICACIÓN Y LÍMITE DE INTENTOS
+  // =====================================================================
+  let tokenAdmin = null;
+  let tokenOperador = null;
 
-console.log('===============================================================');
-console.log(`📊 RESULTADOS: ${aprobadas} Aprobadas | ${fallidas} Fallidas`);
-console.log('===============================================================\n');
+  await ejecutar('PRU-10: Estado del servicio (GET /api/health)', async () => {
+    const r = await http('/api/health');
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(r.json.success, true);
+    assert.strictEqual(r.json.data.baseDeDatos, 'ok');
+  });
 
-if (fallidas > 0) process.exit(1);
+  await ejecutar('PRU-11: Inicio de sesión válido (admin)', async () => {
+    const r = await http('/api/auth/login', {
+      method: 'POST',
+      ip: '10.0.0.1',
+      json: { email: 'admin@nuam.exchange', password: 'Nuam2026!' },
+    });
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(r.json.success, true);
+    assert.ok(r.json.data.token);
+    assert.strictEqual(r.json.data.usuario.rol, 'ADMIN_NUAM');
+    tokenAdmin = r.json.data.token;
+  });
+
+  await ejecutar('PRU-12: Inicio de sesión inválido (HTTP 401)', async () => {
+    const r = await http('/api/auth/login', {
+      method: 'POST',
+      ip: '10.0.0.2',
+      json: { email: 'admin@nuam.exchange', password: 'clave-incorrecta' },
+    });
+    assert.strictEqual(r.status, 401);
+    assert.strictEqual(r.json.success, false);
+    assert.strictEqual(r.json.error.code, 'CREDENCIALES_INVALIDAS');
+  });
+
+  await ejecutar('PRU-13: Bloqueo por límite de intentos (HTTP 429)', async () => {
+    const ip = '10.0.0.3';
+    for (let i = 0; i < 5; i++) {
+      const r = await http('/api/auth/login', {
+        method: 'POST',
+        ip,
+        json: { email: 'intruso@nuam.exchange', password: 'clave-incorrecta' },
+      });
+      assert.strictEqual(r.status, 401);
+    }
+    const bloqueado = await http('/api/auth/login', {
+      method: 'POST',
+      ip,
+      json: { email: 'intruso@nuam.exchange', password: 'clave-incorrecta' },
+    });
+    assert.strictEqual(bloqueado.status, 429);
+    assert.strictEqual(bloqueado.json.error.code, 'RATE_LIMITED');
+  });
+
+  await ejecutar('PRU-14: Ruta protegida exige autenticación (HTTP 401)', async () => {
+    const r = await http('/api/declaraciones');
+    assert.strictEqual(r.status, 401);
+    assert.strictEqual(r.json.error.code, 'AUTH_REQUIRED');
+  });
+
+  // =====================================================================
+  // 5. CONTROL DE ACCESO RBAC
+  // =====================================================================
+  await ejecutar('PRU-15: Operador inicia sesión correctamente', async () => {
+    const r = await http('/api/auth/login', {
+      method: 'POST',
+      ip: '10.0.0.4',
+      json: { email: 'operador.banchile@nuam.exchange', password: 'Nuam2026!' },
+    });
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(r.json.data.usuario.rol, 'OPERADOR_CORREDORA');
+    tokenOperador = r.json.data.token;
+  });
+
+  await ejecutar('PRU-16: Operador ve denegado el acceso a auditoría (HTTP 403)', async () => {
+    const r = await http('/api/auditoria', { token: tokenOperador });
+    assert.strictEqual(r.status, 403);
+    assert.strictEqual(r.json.error.code, 'INSUFFICIENT_PERMISSIONS');
+  });
+
+  await ejecutar('PRU-17: Operador ve denegada la gestión de usuarios (HTTP 403)', async () => {
+    const r = await http('/api/usuarios', { token: tokenOperador });
+    assert.strictEqual(r.status, 403);
+    assert.strictEqual(r.json.error.code, 'INSUFFICIENT_PERMISSIONS');
+  });
+
+  await ejecutar('PRU-18: Operador consulta declaraciones acotadas a su corredora', async () => {
+    const r = await http('/api/declaraciones', { token: tokenOperador });
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(r.json.success, true);
+    assert.ok(r.json.data.length > 0);
+    assert.ok(r.json.data.every((c) => c.tenant_id === 'corr-bc-02'));
+  });
+
+  await ejecutar('PRU-19: Admin consulta todas las corredoras y puede filtrar por tenant', async () => {
+    const todas = await http('/api/declaraciones', { token: tokenAdmin });
+    assert.strictEqual(todas.status, 200);
+
+    const soloLv = await http('/api/declaraciones?tenant=corr-lv-01', { token: tokenAdmin });
+    assert.strictEqual(soloLv.status, 200);
+    assert.ok(soloLv.json.data.every((c) => c.tenant_id === 'corr-lv-01'));
+    assert.ok(todas.json.data.length > soloLv.json.data.length);
+  });
+
+  // =====================================================================
+  // 6. CARGA MASIVA POR HTTP (multipart/form-data)
+  // =====================================================================
+  await ejecutar('PRU-20: Carga masiva vía HTTP (multipart) responde correctamente', async () => {
+    const csv = [
+      'rut_cliente,razon_social,nemotecnico,periodo_fiscal,modalidad,valor_nominal,no_inscrito,f08,f09,f10,f11,f12,f13,f14,f15,f16,f17,f18,f19',
+      '99.111.222-7,"Inmobiliaria El Roble Ltda",FALABELLA,2026,MONTO,12000000,false,0.35,0.15,0.10,0.10,0.00,0.10,0.00,0.00,0.00,0.00,0.00,0.00',
+    ].join('\r\n');
+
+    const form = new FormData();
+    form.append('archivo', new Blob([csv], { type: 'text/csv' }), 'declaraciones.csv');
+
+    const r = await http('/api/declaraciones/carga-masiva', {
+      method: 'POST',
+      token: tokenOperador,
+      form,
+    });
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(r.json.success, true);
+    assert.strictEqual(r.json.data.totalLeidos, 1);
+    assert.strictEqual(r.json.data.rechazados, 0);
+  });
+
+  // =====================================================================
+  // 7. PRUEBAS DE CONTRATO FRONTEND Y CONSISTENCIA DE ROLES (PREVENCIÓN DE REGRESIONES)
+  // =====================================================================
+  await ejecutar('PRU-21: Verificación estática de rutas cliente en public/app.js', async () => {
+    const appJsPath = path.join(__dirname, '..', 'public', 'app.js');
+    const appJsContent = fs.readFileSync(appJsPath, 'utf8');
+
+    // Rutas legadas prohibidas que nunca deben invocarse desde el frontend
+    const rutasProhibidas = [
+      '/api/calificaciones',
+      '/api/carga-masiva',
+      '/api/bolsa-central',
+      '/api/descargar-rechazos',
+      '/api/exportar-declaracion',
+      '/api/lote-prueba'
+    ];
+
+    for (const ruta of rutasProhibidas) {
+      assert.ok(
+        !appJsContent.includes(`'${ruta}`) && !appJsContent.includes(`"${ruta}`),
+        `public/app.js invoca la ruta obsoleta ${ruta}`
+      );
+    }
+
+    // Extraer todas las llamadas a endpoints /api/... en app.js y verificar que responden sin 404
+    const apiRegex = /['"`](\/api\/[a-zA-Z0-9_\-\/?=&${}]+)['"`]/g;
+    let match;
+    const endpointsDetectados = new Set();
+    const dbTest = require('../src/database/connection').getDb();
+    const realUsr = dbTest.prepare('SELECT id FROM usuarios LIMIT 1').get();
+    while ((match = apiRegex.exec(appJsContent)) !== null) {
+      let ep = match[1];
+      if (ep.includes('/api/usuarios/${id}')) {
+        ep = `/api/usuarios/${realUsr.id}`;
+      } else {
+        ep = ep.replace(/\$\{tenantActivo\}/g, 'corr-lv-01')
+               .replace(/\$\{batchIdRechazosActivo\}/g, 'batch-test-01')
+               .replace(/\$\{formato\}/g, 'csv')
+               .replace(/\$\{id\}/g, 'cal-canon-lv-01')
+               .replace(/\$\{encodeURIComponent\([^)]+\)\}/g, 'test')
+               .replace(/\$\{token \? [^}]+\}/g, '');
+      }
+      if (ep.startsWith('/api/')) {
+        endpointsDetectados.add(ep.split('?')[0]);
+      }
+    }
+
+    // Cada endpoint detectado debe existir en el router (no responder 404)
+    for (const ep of endpointsDetectados) {
+      const metodo = (ep === '/api/auth/login' || ep === '/api/auth/logout' || ep === '/api/declaraciones/carga-masiva') ? 'POST' : 'GET';
+      const res = await http(ep, { method: metodo, token: tokenAdmin });
+      assert.notStrictEqual(
+        res.status,
+        404,
+        `El endpoint frontend '${ep}' no existe en el backend (HTTP 404 Not Found)`
+      );
+    }
+  });
+
+  await ejecutar('PRU-22: Matriz transversal completa de los 4 roles institucionales', async () => {
+    // 1. Oficial de Cumplimiento
+    const loginCump = await http('/api/auth/login', {
+      method: 'POST',
+      json: { email: 'cumplimiento@nuam.exchange', password: 'Nuam2026!' }
+    });
+    assert.strictEqual(loginCump.status, 200);
+    const tokenCump = loginCump.json.data.token;
+    assert.strictEqual(loginCump.json.data.usuario.rol, 'OFICIAL_CUMPLIMIENTO');
+
+    // Cumplimiento ve auditoría (200), pero no gestiona usuarios (403)
+    const auditCump = await http('/api/auditoria', { token: tokenCump });
+    assert.strictEqual(auditCump.status, 200);
+    const usrCump = await http('/api/usuarios', { token: tokenCump });
+    assert.strictEqual(usrCump.status, 403);
+
+    // 2. Regulador CMF
+    const loginReg = await http('/api/auth/login', {
+      method: 'POST',
+      json: { email: 'regulador@cmfchile.cl', password: 'Nuam2026!' }
+    });
+    assert.strictEqual(loginReg.status, 200);
+    const tokenReg = loginReg.json.data.token;
+    assert.strictEqual(loginReg.json.data.usuario.rol, 'REGULADOR_CMF');
+
+    // Regulador ve auditoría (200), pero no gestiona usuarios (403)
+    const auditReg = await http('/api/auditoria', { token: tokenReg });
+    assert.strictEqual(auditReg.status, 200);
+    const usrReg = await http('/api/usuarios', { token: tokenReg });
+    assert.strictEqual(usrReg.status, 403);
+
+    // 3. Admin gestiona usuarios (200) y auditoría (200)
+    const auditAdmin = await http('/api/auditoria', { token: tokenAdmin });
+    assert.strictEqual(auditAdmin.status, 200);
+    const usrAdmin = await http('/api/usuarios', { token: tokenAdmin });
+    assert.strictEqual(usrAdmin.status, 200);
+  });
+
+  await ejecutar('PRU-23: Autenticación por parámetro query token (?token=) para descargas', async () => {
+    const rPlantilla = await http(`/api/declaraciones/plantilla?token=${tokenAdmin}`);
+    assert.strictEqual(rPlantilla.status, 200);
+
+    const rExport = await http(`/api/declaraciones/exportar?tenant=corr-lv-01&formato=csv&token=${tokenAdmin}`);
+    assert.strictEqual(rExport.status, 200);
+    assert.ok(rExport.text.includes('RUT_CLIENTE'));
+  });
+
+  await ejecutar('PRU-24: Integridad de esquema de datos en respuestas REST consumidas por UI', async () => {
+    // 1. /api/usuarios
+    const resUsr = await http('/api/usuarios', { token: tokenAdmin });
+    assert.strictEqual(resUsr.status, 200);
+    const primerUsuario = resUsr.json.data[0];
+    assert.ok('rol' in primerUsuario, 'El usuario debe exponer propiedad rol');
+    assert.ok('tenant_id' in primerUsuario, 'El usuario debe exponer propiedad tenant_id');
+    assert.ok('activo' in primerUsuario, 'El usuario debe exponer propiedad activo');
+
+    // 2. /api/declaraciones
+    const resDec = await http('/api/declaraciones', { token: tokenAdmin });
+    assert.strictEqual(resDec.status, 200);
+    const primerDec = resDec.json.data[0];
+    assert.ok('rut_cliente' in primerDec, 'Declaración debe contener rut_cliente');
+    assert.ok('nemotecnico' in primerDec, 'Declaración debe contener nemotecnico');
+    assert.ok('valor_nominal' in primerDec, 'Declaración debe contener valor_nominal');
+    assert.ok('factores' in primerDec, 'Declaración debe contener factores');
+
+    // 3. /api/instrumentos
+    const resInst = await http('/api/instrumentos', { token: tokenAdmin });
+    assert.strictEqual(resInst.status, 200);
+    const primerInst = resInst.json.data[0];
+    assert.ok('nemotecnico' in primerInst, 'Instrumento debe contener nemotecnico');
+    assert.ok('razon_social' in primerInst, 'Instrumento debe contener razon_social');
+  });
+
+  await ejecutar('PRU-25: Consistencia de catálogo de roles entre frontend e índice backend', async () => {
+    const rolesConfig = require('../src/config/roles').ROLES;
+    const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+
+    for (const rolKey of Object.values(rolesConfig)) {
+      assert.ok(indexHtml.includes(rolKey), `index.html debe hacer referencia al rol canónico ${rolKey}`);
+    }
+  });
+
+  await ejecutar('PRU-26: Formato de exportación por defecto es XLSX nativo', async () => {
+    const rExportDefault = await http(`/api/declaraciones/exportar?token=${tokenAdmin}`);
+    assert.strictEqual(rExportDefault.status, 200);
+    const contentType = rExportDefault.headers.get('content-type') || '';
+    assert.ok(
+      contentType.includes('spreadsheetml'),
+      `Content-Type esperado de XLSX, obtenido: ${contentType}`
+    );
+  });
+
+  await ejecutar('PRU-27: Consolidación GLOBAL y auto-resolución de tenant en eliminación', async () => {
+    // 1. Consulta regional GLOBAL consolida todas las corredoras
+    const rGlobal = await http('/api/declaraciones?tenant=GLOBAL', { token: tokenAdmin });
+    assert.strictEqual(rGlobal.status, 200);
+    assert.ok(rGlobal.json.data.length >= 3, 'GLOBAL debe retornar declaraciones de todas las corredoras');
+
+    // 2. Creación y eliminación por ID sin parámetro tenant en DELETE
+    const rCrear = await http('/api/declaraciones', {
+      method: 'POST',
+      token: tokenAdmin,
+      json: {
+        tenant_id: 'corr-lv-01',
+        rut_cliente: '76.123.456-0',
+        razon_social: 'Inversiones Los Andes SpA',
+        nemotecnico: 'BCI',
+        periodo_fiscal: 2026,
+        modalidad: 'FACTOR',
+        valor_nominal: 1000000,
+        no_inscrito: false,
+        factores: { f08: 0.8, f09: 0, f10: 0, f11: 0, f12: 0, f13: 0, f14: 0, f15: 0, f16: 0, f17: 0, f18: 0, f19: 0 }
+      }
+    });
+    assert.strictEqual(rCrear.status, 201);
+    const nuevoId = rCrear.json.data.id;
+
+    // DELETE sin pasar ?tenant= en la query (debe auto-resolver el tenant desde la BD)
+    const rDel = await http(`/api/declaraciones/${nuevoId}`, {
+      method: 'DELETE',
+      token: tokenAdmin
+    });
+    assert.strictEqual(rDel.status, 200);
+    assert.strictEqual(rDel.json.success, true);
+  });
+
+  // =====================================================================
+  // CIERRE Y LIMPIEZA
+  // =====================================================================
+  console.log('\n  🧹 Liberando recursos de prueba...');
+  server.close();
+  closeDb();
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* la carpeta temporal puede quedar si el sistema la bloquea */
+  }
+
+  console.log('===============================================================');
+  console.log(`📊 RESULTADOS: ${aprobadas} Aprobadas | ${fallidas} Fallidas`);
+  console.log('===============================================================\n');
+
+  process.exit(fallidas > 0 ? 1 : 0);
+})();

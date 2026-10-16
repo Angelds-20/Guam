@@ -102,7 +102,7 @@
         </span>
           <span class="text-emerald-700 font-semibold text-xs bg-emerald-50 px-3.5 py-1.5 rounded-full border border-emerald-200 flex items-center space-x-1.5" id="landingGatewayStatus">
             <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
-            <span>Sistema Operacional • Enlace nuam Core Activo</span>
+            <span>Servicio Operacional • Plataforma Disponible</span>
           </span>
       </div>
     </header>
@@ -131,7 +131,7 @@
               <span class="block text-brand-orange font-normal italic text-3xl sm:text-4xl mt-1">nuam exchange</span>
             </h1>
             <p class="text-sm text-slate-500 max-w-xl leading-relaxed mt-4 font-normal">
-              Plataforma de gestión de calificaciones tributarias, liquidación de factores fiscales F8 al F19 y carga masiva con lógica Upsert para corredoras participantes.
+              Plataforma de gestión de calificaciones tributarias, liquidación de factores fiscales F8 al F19 y carga masiva de declaraciones para corredoras, custodios, auditores y entidades reguladoras.
             </p>
           </div>
 
@@ -244,12 +244,12 @@
 
         <button id="navAuditoria" onclick="cambiarSeccion('auditoria')" class="px-4 py-2 rounded-xl text-slate-600 hover:text-brand-black hover:bg-white/80 flex items-center space-x-2 transition">
           <i data-lucide="history" class="w-3.5 h-3.5"></i>
-          <span>Auditoría JSON</span>
+          <span>Registro de Auditoría</span>
         </button>
 
         <button id="navBolsaCentral" onclick="cambiarSeccion('bolsacentral')" class="px-4 py-2 rounded-xl text-slate-600 hover:text-brand-black hover:bg-white/80 flex items-center space-x-2 transition">
           <i data-lucide="shield-check" class="w-3.5 h-3.5"></i>
-          <span>Bolsa nuam (Core)</span>
+          <span>Instrumentos de Bolsa</span>
         </button>
 
         <button id="navUsuarios" onclick="cambiarSeccion('usuarios')" class="px-4 py-2 rounded-xl text-slate-600 hover:text-brand-black hover:bg-white/80 flex items-center space-x-2 transition" title="Gestión de Cuentas y Permisos (Exclusivo Administrador)">
@@ -258,7 +258,7 @@
         </button>
       </nav>
 
-      <!-- Derecha: Selector de Corredora, Core Gateway y Operador -->
+      <!-- Derecha: Selector de Corredora y Perfil del Operador -->
       <div class="flex items-center space-x-3 flex-wrap">
         <!-- Selector de Corredora (Multitenant) -->
         <div class="bg-slate-100 rounded-xl px-3 py-1.5 border border-slate-200 flex items-center space-x-2">
@@ -277,14 +277,14 @@
         <!-- Perfil del Operador y Botón Salir -->
         <div class="flex items-center space-x-2 pl-2 border-l border-slate-200">
           <div id="operadorAvatarInitials" class="w-7 h-7 rounded-full bg-brand-black text-white flex items-center justify-center font-bold text-[10px] shadow-xs">
-            CC
+            OP
           </div>
           <div class="hidden sm:block leading-none">
             <div class="flex items-center space-x-1.5">
-              <span id="operadorNombre" class="font-bold text-[11px] text-brand-black block">César Contreras</span>
-              <span id="operadorRangoBadge" class="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">SUPER ADMIN</span>
+              <span id="operadorNombre" class="font-bold text-[11px] text-brand-black block">Operador Institucional</span>
+              <span id="operadorRangoBadge" class="text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-200">CONECTADO</span>
             </div>
-            <span id="operadorCargo" class="text-[9px] text-slate-400 mt-0.5 block">Líder Técnico & Arquitectura</span>
+            <span id="operadorCargo" class="text-[9px] text-slate-400 mt-0.5 block">nuam exchange</span>
           </div>
           <!-- Botón Cerrar Sesión -->
           <button onclick="cerrarSesion()" class="ml-2 px-2.5 py-1.5 rounded-xl border border-slate-200 text-[11px] font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 transition flex items-center space-x-1" title="Cerrar Sesión B2B">
@@ -384,13 +384,13 @@
                 </div>
               </div>
 
-              <!-- Buscador y Acciones de Demostración Limpia -->
+              <!-- Buscador y Acciones de Mantenimiento de Cartera -->
               <div class="flex items-center space-x-2 w-full sm:w-auto">
                 <div class="relative w-full sm:w-64">
                   <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400"></i>
                   <input type="text" id="busquedaInput" onkeyup="filtrarTabla()" placeholder="Filtrar por RUT, Nemotécnico..." class="w-full pl-8 pr-3 py-1.5 bg-slate-50 text-xs text-brand-black font-medium rounded-xl border border-slate-200 focus:outline-none focus:ring-1 focus:ring-brand-black transition">
                 </div>
-                <button id="btnVaciarCartera" onclick="vaciarCartera()" class="px-2.5 py-1.5 rounded-xl border border-rose-200 bg-rose-50/60 hover:bg-rose-100/80 text-rose-700 text-[11px] font-bold transition flex items-center space-x-1 flex-shrink-0" title="Vaciar cartera para demostrar ingesta limpia desde cero">
+                <button id="btnVaciarCartera" onclick="vaciarCartera()" class="px-2.5 py-1.5 rounded-xl border border-rose-200 bg-rose-50/60 hover:bg-rose-100/80 text-rose-700 text-[11px] font-bold transition flex items-center space-x-1 flex-shrink-0" title="Elimina las declaraciones registradas de la corredora activa">
                   <i data-lucide="eraser" class="w-3.5 h-3.5 text-rose-600"></i>
                   <span class="hidden md:inline">Vaciar Cartera</span>
                 </button>
@@ -438,29 +438,24 @@
           <div class="bg-white rounded-3xl p-7 border border-brand-border shadow-sm space-y-6">
             <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
               <div>
-                <h2 class="text-lg font-bold text-brand-black">Ingesta Masiva de Declaraciones (Lógica Upsert)</h2>
+                <h2 class="text-lg font-bold text-brand-black">Carga Masiva de Declaraciones</h2>
                 <p class="text-xs text-slate-500 mt-0.5">
-                  Procesamiento por lote compatible con Microsoft Excel (.xlsx) y archivos CSV. Actualiza posiciones existentes sin duplicar e incorpora nuevas.
+                  Procesamiento transaccional por lote compatible con Microsoft Excel (.xlsx) y archivos CSV. Actualiza posiciones existentes sin duplicar e incorpora nuevas; las filas que infringen la regla fiscal son rechazadas sin alterar el resto del lote.
                 </p>
               </div>
 
               <!-- Botones de Descarga de Plantillas Oficiales -->
               <div class="flex flex-wrap items-center gap-2">
-                <button onclick="descargarPlantillaExcel()" class="px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition flex items-center space-x-1.5" title="Plantilla con formato nativo de Microsoft Excel">
+                <button onclick="descargarPlantillaExcel()" class="px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold transition flex items-center space-x-1.5" title="Plantilla oficial de carga masiva (.xlsx)">
                   <i data-lucide="file-spreadsheet" class="w-4 h-4 text-emerald-600"></i>
-                  <span>Plantilla Excel (.xlsx)</span>
-                </button>
-                <button onclick="descargarPlantillaCsv()" class="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-bold transition flex items-center space-x-1.5" title="Plantilla en formato CSV compatible UTF-8">
-                  <i data-lucide="file-text" class="w-4 h-4 text-slate-600"></i>
-                  <span>Plantilla CSV</span>
+                  <span>Plantilla Oficial (.xlsx)</span>
                 </button>
               </div>
             </div>
 
-            <!-- PASO 1: ZONA PRINCIPAL DE CARGA (DRAG & DROP O EXAMINAR) -->
+            <!-- Zona de carga de archivos de declaración -->
             <div class="space-y-3">
               <div class="flex items-center space-x-2">
-                <span class="w-5 h-5 rounded-full bg-brand-black text-white text-[10px] font-bold flex items-center justify-center">1</span>
                 <span class="font-bold text-xs uppercase tracking-wider text-brand-black">Subir Archivo de Declaración (.xlsx o .csv)</span>
               </div>
 
@@ -487,100 +482,6 @@
               </div>
             </div>
 
-            <!-- PASO 2: ATAJOS DE DEMOSTRACIÓN RÁPIDA (ARCHIVOS PRECARGADOS) -->
-            <div class="pt-4 border-t border-slate-100 space-y-3">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-2">
-                  <span class="w-5 h-5 rounded-full bg-slate-200 text-slate-700 text-[10px] font-bold flex items-center justify-center">2</span>
-                  <span class="font-bold text-xs uppercase tracking-wider text-slate-700">O bien: Demostración Rápida con Datos Preconfigurados</span>
-                </div>
-                <span class="text-[10px] text-slate-400 hidden sm:inline">Un clic para simular ingesta bursátil oficial</span>
-              </div>
-              
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                <!-- Tarjeta 1: LarraínVial Acciones Chile -->
-                <div id="cardAutoCargaLV" class="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-2 flex flex-col justify-between">
-                  <div>
-                    <div class="flex items-center justify-between">
-                      <span class="font-bold text-xs text-brand-black">LarraínVial IPSA</span>
-                      <span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded">Chile</span>
-                    </div>
-                    <span class="text-[10px] text-slate-500 block mt-0.5">CHILE, SQM-B, CENCOSUD, FALABELLA</span>
-                  </div>
-                  <div class="flex items-center space-x-1.5 pt-1.5 border-t border-slate-200/60">
-                    <button onclick="cargarArchivoMercadoReal('cartera_larrainvial_acciones_chile_2026.xlsx')" class="flex-1 py-1.5 bg-brand-black hover:bg-black text-white text-[10px] font-bold rounded-lg transition flex items-center justify-center space-x-1">
-                      <i data-lucide="play" class="w-3 h-3 text-brand-orange"></i>
-                      <span>Auto-Cargar</span>
-                    </button>
-                    <a href="/archivos_mercado_real/cartera_larrainvial_acciones_chile_2026.xlsx" download class="p-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-[10px] transition border border-slate-200" title="Descargar archivo Excel">
-                      <i data-lucide="download" class="w-3.5 h-3.5"></i>
-                    </a>
-                  </div>
-                </div>
-
-                <!-- Tarjeta 2: Banchile Renta Variable -->
-                <div id="cardAutoCargaBC" class="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-2 flex flex-col justify-between">
-                  <div>
-                    <div class="flex items-center justify-between">
-                      <span class="font-bold text-xs text-brand-black">Banchile Variable</span>
-                      <span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-1.5 py-0.5 rounded">Chile</span>
-                    </div>
-                    <span class="text-[10px] text-slate-500 block mt-0.5">BCI, CMPC, COPEC, ANDINA-B, LTM</span>
-                  </div>
-                  <div class="flex items-center space-x-1.5 pt-1.5 border-t border-slate-200/60">
-                    <button onclick="cargarArchivoMercadoReal('cartera_banchile_renta_variable_2026.xlsx')" class="flex-1 py-1.5 bg-brand-black hover:bg-black text-white text-[10px] font-bold rounded-lg transition flex items-center justify-center space-x-1">
-                      <i data-lucide="play" class="w-3 h-3 text-brand-orange"></i>
-                      <span>Auto-Cargar</span>
-                    </button>
-                    <a href="/archivos_mercado_real/cartera_banchile_renta_variable_2026.xlsx" download class="p-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-[10px] transition border border-slate-200" title="Descargar archivo Excel">
-                      <i data-lucide="download" class="w-3.5 h-3.5"></i>
-                    </a>
-                  </div>
-                </div>
-
-                <!-- Tarjeta 3: Credicorp Mercado Integrado -->
-                <div id="cardAutoCargaCC" class="bg-slate-50/80 p-3.5 rounded-xl border border-slate-200 space-y-2 flex flex-col justify-between">
-                  <div>
-                    <div class="flex items-center justify-between">
-                      <span class="font-bold text-xs text-brand-black">Credicorp nuam</span>
-                      <span class="text-[9px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">Perú / Col</span>
-                    </div>
-                    <span class="text-[10px] text-slate-500 block mt-0.5">BAP, ECOPETROL, PFBCOLOM, IFS</span>
-                  </div>
-                  <div class="flex items-center space-x-1.5 pt-1.5 border-t border-slate-200/60">
-                    <button onclick="cargarArchivoMercadoReal('cartera_credicorp_mercado_integrado_nuam.xlsx')" class="flex-1 py-1.5 bg-brand-black hover:bg-black text-white text-[10px] font-bold rounded-lg transition flex items-center justify-center space-x-1">
-                      <i data-lucide="play" class="w-3 h-3 text-brand-orange"></i>
-                      <span>Auto-Cargar</span>
-                    </button>
-                    <a href="/archivos_mercado_real/cartera_credicorp_mercado_integrado_nuam.xlsx" download class="p-1.5 bg-white hover:bg-slate-100 text-slate-700 rounded-lg text-[10px] transition border border-slate-200" title="Descargar archivo Excel">
-                      <i data-lucide="download" class="w-3.5 h-3.5"></i>
-                    </a>
-                  </div>
-                </div>
-
-                <!-- Tarjeta 4: Lote Rectificación Upsert con Rechazo -->
-                <div id="cardAutoCargaRechazo" class="bg-amber-50/70 p-3.5 rounded-xl border border-amber-200 space-y-2 flex flex-col justify-between">
-                  <div>
-                    <div class="flex items-center justify-between">
-                      <span class="font-bold text-xs text-amber-900">Upsert + Rechazo</span>
-                      <span class="text-[9px] bg-rose-100 text-rose-800 font-bold px-1.5 py-0.5 rounded">Prueba F19</span>
-                    </div>
-                    <span class="text-[10px] text-amber-800 block mt-0.5">Actualiza 2, Inserta 1, Rechaza 1 (Σ=1.15)</span>
-                  </div>
-                  <div class="flex items-center space-x-1.5 pt-1.5 border-t border-amber-200/60">
-                    <button onclick="cargarArchivoMercadoReal('lote_rectificacion_upsert_con_rechazo.xlsx')" class="flex-1 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-bold rounded-lg transition flex items-center justify-center space-x-1">
-                      <i data-lucide="alert-triangle" class="w-3 h-3 text-white"></i>
-                      <span>Auto-Cargar</span>
-                    </button>
-                    <a href="/archivos_mercado_real/lote_rectificacion_upsert_con_rechazo.xlsx" download class="p-1.5 bg-white hover:bg-amber-100 text-amber-800 rounded-lg text-[10px] transition border border-amber-200" title="Descargar archivo Excel">
-                      <i data-lucide="download" class="w-3.5 h-3.5"></i>
-                    </a>
-                  </div>
-                </div>
-
-              </div>
-            </div>
-
             <!-- Panel de Resultados del Último Lote -->
             <div id="panelResultadoLote" class="hidden p-5 rounded-2xl bg-slate-50 border border-slate-200 space-y-4 animate-fadeIn">
               <div class="flex items-center justify-between">
@@ -603,7 +504,7 @@
                   <span id="resTotalInsertados" class="text-lg font-mono font-extrabold text-emerald-600">0</span>
                 </div>
                 <div class="bg-white p-3 rounded-xl border border-slate-200">
-                  <span class="text-[10px] uppercase font-bold text-blue-600 block">Actualizados (Upsert)</span>
+                  <span class="text-[10px] uppercase font-bold text-blue-600 block">Actualizados</span>
                   <span id="resTotalActualizados" class="text-lg font-mono font-extrabold text-blue-600">0</span>
                 </div>
                 <div class="bg-white p-3 rounded-xl border border-slate-200">
@@ -634,7 +535,7 @@
           <div class="bg-white rounded-3xl p-6 border border-brand-border shadow-sm">
             <div class="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
               <div>
-                <h2 class="text-sm font-bold text-brand-black">Bitácora de Auditoría Inmutable (Repositorio JSON)</h2>
+                <h2 class="text-sm font-bold text-brand-black">Registro Oficial de Auditoría</h2>
                 <p class="text-[11px] text-slate-400">Trazabilidad exigida por la CMF, SFC y SMV para operaciones bursátiles</p>
               </div>
               <button onclick="cargarAuditoria()" class="p-2 rounded-full hover:bg-slate-100 text-slate-600 transition" title="Refrescar">
@@ -665,34 +566,6 @@
         <!-- SECCIÓN 4: VISTA DE BOLSA CENTRAL (CATÁLOGO FULL) -->
         <!-- ======================================================================= -->
         <div id="seccionBolsaCentral" class="hidden space-y-6">
-          <!-- Tarjeta de Certificación de No Impacto -->
-          <div class="bg-brand-black text-white rounded-3xl p-6 border border-slate-800 shadow-md">
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div class="flex items-center space-x-2 mb-1.5">
-                  <span class="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    PRINCIPIO DE NO IMPACTO CERTIFICADO
-                  </span>
-                  <span class="text-[11px] text-slate-400">EVA 1 / EVA 2</span>
-                </div>
-                <h2 class="text-base font-extrabold text-white">Aislamiento Transaccional de la Bolsa Central</h2>
-                <p class="text-xs text-slate-300 mt-1 max-w-2xl">
-                  El motor de trading y calce de órdenes opera en modo de solo consulta. Esta prueba demuestra ante el docente que cualquier intento de escritura es rechazado con <strong>HTTP 403 Forbidden</strong>.
-                </p>
-              </div>
-
-              <div class="flex-shrink-0">
-                <button onclick="probarEscrituraBolsaCentral()" class="px-5 py-3 bg-brand-orange hover:bg-brand-orangeHover text-white text-xs font-bold rounded-xl shadow-md transition flex items-center space-x-2">
-                  <i data-lucide="shield-alert" class="w-4 h-4"></i>
-                  <span>Ejecutar Prueba de Escritura (HTTP 403)</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- Contenedor del resultado de la prueba -->
-            <div id="resultadoTestNoImpactoBolsa" class="hidden mt-4 p-4 rounded-2xl text-xs bg-black/60 border border-slate-700"></div>
-          </div>
-
           <!-- Catálogo de Instrumentos Oficiales -->
           <div class="bg-white rounded-3xl p-6 border border-brand-border shadow-sm">
             <div class="flex items-center justify-between mb-4">
@@ -779,10 +652,10 @@
                 <!-- Filtros de Rol -->
                 <div class="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-semibold text-slate-600">
                   <button onclick="filtrarUsuariosRango('TODOS')" id="filtroUsrTodos" class="px-3 py-1.5 rounded-lg bg-white shadow-2xs font-bold text-brand-black">Todos</button>
-                  <button onclick="filtrarUsuariosRango('SUPER_ADMIN')" id="filtroUsrSuper" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Administrador</button>
-                  <button onclick="filtrarUsuariosRango('OPERADOR_SENIOR')" id="filtroUsrOp" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Operador</button>
-                  <button onclick="filtrarUsuariosRango('AUDITOR_CMF')" id="filtroUsrAuditor" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Auditor</button>
-                  <button onclick="filtrarUsuariosRango('ADMIN_CORREDORA')" id="filtroUsrAdmin" class="hidden">Admin Corredora</button>
+                  <button onclick="filtrarUsuariosRango('ADMIN_NUAM')" id="filtroUsrSuper" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Administrador</button>
+                  <button onclick="filtrarUsuariosRango('OPERADOR_CORREDORA')" id="filtroUsrOp" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Operador</button>
+                  <button onclick="filtrarUsuariosRango('REGULADOR_CMF')" id="filtroUsrAuditor" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Regulador CMF</button>
+                  <button onclick="filtrarUsuariosRango('OFICIAL_CUMPLIMIENTO')" id="filtroUsrAdmin" class="px-3 py-1.5 rounded-lg hover:text-brand-black">Cumplimiento</button>
                 </div>
 
                 <!-- Botón Crear Usuario -->
@@ -906,13 +779,6 @@
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <div class="flex items-center space-x-2">
               <span class="font-bold text-slate-800">Factores Tributarios (F08 al F19)</span>
-              <!-- Botones rápidos de ayuda para la demostración -->
-              <button type="button" onclick="demoLlenarFactoresValidos()" class="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg text-[10px] font-bold transition" title="Rellena factores con suma 0.85 (válido)">
-                Demo Válido (0.85)
-              </button>
-              <button type="button" onclick="demoLlenarFactoresInvalidos()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 rounded-lg text-[10px] font-bold transition" title="Rellena factores con suma 1.15 (demuestra error)">
-                Demo Inválido (1.15)
-              </button>
             </div>
             <div id="indicadorValidador" class="px-3 py-1 rounded-full font-mono font-bold text-[11px] bg-slate-100 text-slate-700 border border-slate-200">
               Suma: 0.000000 / 1.000000
@@ -1040,9 +906,10 @@
           <div>
             <label class="block font-bold text-slate-700 mb-1">Rol Asignado *</label>
             <select id="formUsuarioRango" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-1 focus:ring-brand-black focus:outline-none font-semibold cursor-pointer">
-              <option value="SUPER_ADMIN">Administrador (Control Total & Usuarios)</option>
-              <option value="OPERADOR_SENIOR" selected>Operador (Carga y Gestión de Cartera)</option>
-              <option value="AUDITOR_CMF">Auditor (Fiscalización Solo Lectura)</option>
+              <option value="ADMIN_NUAM">Administrador nuam (Control Total & Usuarios)</option>
+              <option value="OPERADOR_CORREDORA" selected>Operador Corredora (Carga y Declaraciones)</option>
+              <option value="OFICIAL_CUMPLIMIENTO">Oficial de Cumplimiento (Auditoría y Supervisión)</option>
+              <option value="REGULADOR_CMF">Regulador CMF (Fiscalización Solo Lectura)</option>
             </select>
           </div>
         </div>
@@ -1071,90 +938,6 @@
         </div>
 
       </form>
-    </div>
-  </div>
-
-  <!-- ========================================================================= -->
-  <!-- DRAWER LATERAL: ESTADO DEL CORE GATEWAY & AUDITORÍA (DESPLEGABLE) -->
-  <!-- ========================================================================= -->
-  <div id="drawerCore" class="fixed inset-0 z-50 overflow-hidden hidden" aria-labelledby="drawer-title" role="dialog" aria-modal="true">
-    <!-- Backdrop oscuro con blur -->
-    <div id="drawerBackdrop" class="fixed inset-0 bg-black/50 backdrop-blur-xs transition-opacity duration-300 opacity-0" onclick="toggleDrawerCore()"></div>
-
-    <div class="fixed inset-y-0 right-0 max-w-full flex pl-10 pointer-events-none">
-      <div id="drawerPanel" class="w-screen max-w-md bg-brand-dark text-white p-6 shadow-2xl flex flex-col justify-between border-l border-brand-borderDark transform translate-x-full transition-transform duration-300 ease-in-out pointer-events-auto">
-        
-        <div class="space-y-5 overflow-y-auto pr-1">
-          <!-- Cabecera del Drawer -->
-          <div class="flex items-center justify-between pb-4 border-b border-brand-borderDark">
-            <div class="flex items-center space-x-3">
-              <img src="/nuam-symbol-orange.png" alt="nuam" class="w-6 h-6 object-contain">
-              <div>
-                <h3 class="font-extrabold text-sm text-white">nuam Core Gateway</h3>
-                <span class="text-[10px] text-slate-400">Enlace Transaccional y Auditoría</span>
-              </div>
-            </div>
-            <button onclick="toggleDrawerCore()" class="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-white/10 transition">
-              <i data-lucide="x" class="w-4 h-4"></i>
-            </button>
-          </div>
-
-          <!-- Estado de Aislamiento Transaccional -->
-          <div class="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
-            <div class="flex items-center justify-between">
-              <span class="text-xs font-bold text-slate-300">Aislamiento Transaccional</span>
-              <span class="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                MODO REPLICACIÓN
-              </span>
-            </div>
-            <p class="text-[11px] text-slate-400 leading-relaxed">
-              El motor central de calce y órdenes de nuam opera en un bus desacoplado. Las terminales de backoffice poseen permisos de solo consulta sobre los libros de órdenes centrales.
-            </p>
-            <button onclick="probarEscrituraBolsaCentral()" class="w-full py-2 bg-white/10 hover:bg-white/20 border border-white/20 text-white text-xs font-bold rounded-xl transition flex items-center justify-center space-x-2">
-              <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400"></i>
-              <span>Verificar Restricción de Escritura (Ping Core)</span>
-            </button>
-            <div id="resultadoTestNoImpacto" class="hidden p-3 rounded-xl text-xs bg-black/60 border border-slate-700"></div>
-          </div>
-
-          <!-- Feed de Auditoría JSON Inmutable -->
-          <div>
-            <div class="flex items-center justify-between mb-2">
-              <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                Trazabilidad de Operaciones (Audit Trail):
-              </span>
-              <button onclick="cargarAuditoria()" class="text-[10px] text-slate-400 hover:text-white flex items-center space-x-1">
-                <i data-lucide="refresh-cw" class="w-3 h-3"></i>
-                <span>Actualizar</span>
-              </button>
-            </div>
-            <div id="miniFeedAuditoria" class="space-y-2 font-mono text-[11px] max-h-72 overflow-y-auto pr-1 scrollbar-none">
-              <!-- Cargado dinámicamente -->
-            </div>
-          </div>
-        </div>
-
-        <!-- Especificaciones Normativas y de Seguridad Core Gateway -->
-        <div class="pt-4 border-t border-brand-borderDark space-y-2 text-xs">
-          <div class="flex justify-between text-slate-400 text-[11px]">
-            <span>Infraestructura:</span>
-            <span class="font-bold text-white">nuam Cloud Node (Santiago DC)</span>
-          </div>
-          <div class="flex justify-between text-slate-400 text-[11px]">
-            <span>Protocolo de Seguridad:</span>
-            <span class="font-mono text-emerald-400 font-bold">TLS 1.3 / AES-256</span>
-          </div>
-          <div class="flex justify-between text-slate-400 text-[11px]">
-            <span>Permiso Core Central:</span>
-            <span class="font-mono text-amber-400 font-bold">SELECT ONLY (Solo Consulta)</span>
-          </div>
-          <div class="flex justify-between text-slate-400 text-[11px]">
-            <span>Estado del Enlace:</span>
-            <span class="font-mono text-emerald-400 font-bold">Sincronizado (Cero Impacto)</span>
-          </div>
-        </div>
-
-      </div>
     </div>
   </div>
 

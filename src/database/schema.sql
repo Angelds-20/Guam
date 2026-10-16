@@ -1,13 +1,12 @@
 -- ==============================================================================
--- MODELO DE BASE DE DATOS RELACIONAL ESTRUCTURADA EN TERCERA FORMA NORMAL (3FN)
--- Caso de Estudio: nuam exchange - Mantenedor de Calificaciones Tributarias
--- Criterio de Rúbrica: 2.1.4.8 (Base de Datos Relacional Normalizada)
--- Motor: SQLite 3 / PostgreSQL Compatible
+-- MODELO DE DATOS RELACIONAL (3FN) - nuam exchange
+-- Se conserva el esquema normalizado existente; se añade el modelo de autenticación
+-- (password_hash, rol, permissions, activo) y la tabla de auditoría.
+-- Las tablas se crean con IF NOT EXISTS; la evolución de columnas se gestiona
+-- de forma idempotente en migrate.js mediante PRAGMA user_version.
 -- ==============================================================================
 
-PRAGMA foreign_keys = ON;
-
--- 1. Tabla de Corredoras Participantes (Aislamiento Multitenant)
+-- 1. Corredoras participantes (aislamiento multi-tenant)
 CREATE TABLE IF NOT EXISTS corredoras (
     id VARCHAR(36) PRIMARY KEY,
     codigo VARCHAR(20) NOT NULL UNIQUE,
@@ -18,22 +17,26 @@ CREATE TABLE IF NOT EXISTS corredoras (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- 2. Tabla de Usuarios Institucionales (Control de Acceso RBAC)
+-- 2. Usuarios institucionales (control de acceso RBAC)
 CREATE TABLE IF NOT EXISTS usuarios (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(36) NOT NULL,
     email VARCHAR(100) NOT NULL UNIQUE,
     nombre VARCHAR(100) NOT NULL,
-    rango VARCHAR(30) NOT NULL DEFAULT 'OPERADOR_SENIOR', -- SUPER_ADMIN, ADMIN_CORREDORA, OPERADOR_SENIOR, AUDITOR_CMF
-    cargo VARCHAR(100) NOT NULL,
+    rango VARCHAR(30) NOT NULL DEFAULT 'OPERADOR_SENIOR',
+    cargo VARCHAR(100) NOT NULL DEFAULT '',
     avatar VARCHAR(10) DEFAULT 'OP',
     estado VARCHAR(20) DEFAULT 'ACTIVO',
+    password_hash TEXT,
+    rol VARCHAR(30),
+    permissions TEXT NOT NULL DEFAULT '[]',
+    activo INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     ultimo_acceso VARCHAR(50) DEFAULT 'Reciente',
     FOREIGN KEY (tenant_id) REFERENCES corredoras(id) ON DELETE RESTRICT
 );
 
--- 3. Tabla Principal de Calificaciones Tributarias (3FN: Posición Global)
+-- 3. Declaraciones de calificaciones tributarias (3FN)
 CREATE TABLE IF NOT EXISTS calificaciones_tributarias (
     id VARCHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(36) NOT NULL,
@@ -48,11 +51,10 @@ CREATE TABLE IF NOT EXISTS calificaciones_tributarias (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tenant_id) REFERENCES corredoras(id) ON DELETE RESTRICT,
-    -- Restricción de unicidad para soporte de UPSERT por Corredora
     CONSTRAINT uq_calificacion_tenant UNIQUE (tenant_id, rut_cliente, nemotecnico, periodo_fiscal)
 );
 
--- 4. Tabla Detalle de Factores Tributarios F08 a F19 (3FN: Desagregación de Factores)
+-- 4. Detalle de factores tributarios F08 a F19 (desagregación 3FN)
 CREATE TABLE IF NOT EXISTS factores_detalle (
     id VARCHAR(36) PRIMARY KEY,
     calificacion_id VARCHAR(36) NOT NULL UNIQUE,
@@ -70,14 +72,32 @@ CREATE TABLE IF NOT EXISTS factores_detalle (
     f19 NUMERIC(10, 6) DEFAULT 0.000000,
     suma_total NUMERIC(10, 6) NOT NULL,
     FOREIGN KEY (calificacion_id) REFERENCES calificaciones_tributarias(id) ON DELETE CASCADE,
-    -- Restricción de Integridad CHECK: Garantiza la Regla Fiscal en el Motor SQL (Sumatoria <= 1.0)
     CONSTRAINT chk_regla_suma_factores CHECK (suma_total >= 0.000000 AND suma_total <= 1.000001)
 );
 
--- 5. Catálogo Oficial de Instrumentos de Bolsa Central (SOLO LECTURA)
+-- 5. Catálogo oficial de instrumentos de la Bolsa Central
 CREATE TABLE IF NOT EXISTS bolsa_central_instrumentos (
     nemotecnico VARCHAR(30) PRIMARY KEY,
     razon_social VARCHAR(150) NOT NULL,
     mercado VARCHAR(50) NOT NULL,
     activo INTEGER DEFAULT 1
 );
+
+-- 6. Registro oficial de auditoría (trazabilidad inmutable de eventos de negocio)
+CREATE TABLE IF NOT EXISTS auditoria_eventos (
+    id VARCHAR(36) PRIMARY KEY,
+    usuario_id VARCHAR(36),
+    usuario_email VARCHAR(100),
+    accion VARCHAR(50) NOT NULL,
+    entidad VARCHAR(50) NOT NULL,
+    entidad_id VARCHAR(36),
+    tenant_id VARCHAR(36),
+    detalle TEXT,
+    ip VARCHAR(64),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_calificaciones_tenant_rut ON calificaciones_tributarias(tenant_id, rut_cliente);
+CREATE INDEX IF NOT EXISTS idx_factores_calificacion ON factores_detalle(calificacion_id);
+CREATE INDEX IF NOT EXISTS idx_auditoria_created ON auditoria_eventos(created_at);
+CREATE INDEX IF NOT EXISTS idx_auditoria_usuario ON auditoria_eventos(usuario_email);

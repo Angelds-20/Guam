@@ -6,11 +6,11 @@
 
 set -e
 
-echo ">>> [1/5] Actualizando paquetes del sistema en Amazon Linux..."
+echo ">>> [1/6] Actualizando paquetes del sistema en Amazon Linux..."
 sudo dnf update -y || sudo yum update -y
 
-echo ">>> [2/5] Instalando Node.js 20/22, Git y herramientas de compilación..."
-sudo dnf install -y nodejs npm git gcc-c++ make || sudo yum install -y nodejs npm git gcc-c++ make
+echo ">>> [2/6] Instalando Node.js 20, Nginx, Git y herramientas de compilación..."
+sudo dnf install -y nodejs20 nodejs20-npm nginx git gcc-c++ make python3 || sudo dnf install -y nodejs npm nginx git gcc-c++ make python3 || sudo yum install -y nodejs npm nginx git gcc-c++ make python3
 
 echo ">>> [3/6] Preparando configuración de entorno e instalando dependencias..."
 if [ ! -f .env ] && [ -f .env.example ]; then
@@ -19,16 +19,25 @@ if [ ! -f .env ] && [ -f .env.example ]; then
 fi
 npm install --production
 
-echo ">>> [4/5] Instalando PM2 (Process Manager) para ejecución continua..."
-sudo npm install -g pm2 || npm install pm2
-
-echo ">>> [5/6] Configurando redirección de puerto 80 a 3000 (iptables)..."
-# Permitir acceso directo por HTTP puerto 80 sin obligar a escribir :3000
-sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 3000 || true
-# Guardar regla si iptables-services está disponible
-if command -v iptables-save >/dev/null 2>&1; then
-    sudo iptables-save | sudo tee /etc/sysconfig/iptables >/dev/null 2>&1 || true
+echo ">>> [4/6] Configurando Nginx Reverse Proxy (Puerto 80 -> 3000)..."
+if [ -f nginx.conf ]; then
+    sudo cp nginx.conf /etc/nginx/conf.d/nuam.conf
+    # Asegurar que el server por defecto de nginx no colisione
+    sudo sed -i 's/listen       80;/listen       8080;/g' /etc/nginx/nginx.conf 2>/dev/null || true
+    sudo sed -i 's/listen       \[::\]:80;/listen       \[::\]:8080;/g' /etc/nginx/nginx.conf 2>/dev/null || true
+    sudo sed -i 's/listen       80 default_server;/listen       8080 default_server;/g' /etc/nginx/nginx.conf 2>/dev/null || true
+    sudo sed -i 's/listen       \[::\]:80 default_server;/listen       \[::\]:8080 default_server;/g' /etc/nginx/nginx.conf 2>/dev/null || true
+    if [ -f /etc/nginx/conf.d/default.conf ]; then
+        sudo mv /etc/nginx/conf.d/default.conf /etc/nginx/conf.d/default.conf.bak 2>/dev/null || true
+    fi
+    sudo nginx -t
+    sudo systemctl enable nginx
+    sudo systemctl restart nginx
 fi
+
+echo ">>> [5/6] Instalando PM2 (Process Manager) para ejecución continua..."
+sudo npm install -g pm2 || npm install pm2
+export PATH="./node_modules/.bin:$PATH"
 
 echo ">>> [6/6] Iniciando la aplicación con PM2 y registrando demonio systemd..."
 # Obtener usuario y home actual
@@ -58,9 +67,14 @@ pm2 save
 echo ""
 echo "=============================================================================="
 echo "✅ DESPLIEGUE EN AWS EC2 COMPLETADO CON ÉXITO Y BLINDADO ANTE REINICIOS"
-echo "🌐 Acceso web estándar (Puerto 80):   http://TU_IP_ELASTICA/"
-echo "🌐 Acceso web alternativo (Pto 3000): http://TU_IP_ELASTICA:3000"
-echo "🔄 Persistencia: Servicio systemd 'pm2-$CURRENT_USER' activo y habilitado"
+IMDS_TOKEN=$(curl -s --connect-timeout 2 -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+if [ -n "$IMDS_TOKEN" ]; then
+    PUBLIC_IP=$(curl -s -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "54.165.130.63")
+else
+    PUBLIC_IP=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/public-ipv4 2>/dev/null || echo "54.165.130.63")
+fi
+echo "🌐 Acceso web estándar (Puerto 80):   http://${PUBLIC_IP}/"
+echo "🔄 Persistencia: Servicio systemd 'pm2-$CURRENT_USER' y 'nginx' habilitados"
 echo "🔍 Monitoreo y logs en vivo:          pm2 logs nuam-app"
 echo "=============================================================================="
 

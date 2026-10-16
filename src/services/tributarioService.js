@@ -2,56 +2,51 @@
  * SERVICIO DE NEGOCIO TRIBUTARIO - nuam exchange
  * Implementa:
  * 1. Validador estricto de Regla Fiscal: sum(F8..F19) <= 1.0
- * 2. Operaciones CRUD con aislamiento Multitenant
- * 3. Ingesta Masiva Inteligente (Lógica Upsert: Update + Insert)
- * 4. Generación y descarga de Log de Rechazos CSV
- * 5. Exportación oficial de Declaración Consolidada
+ * 2. Operaciones CRUD con aislamiento multi-tenant (corredoras)
+ * 3. Carga masiva de declaraciones (upsert transaccional con rechazos aislados)
+ * 4. Generación y descarga del log de rechazos CSV
+ * 5. Exportación oficial de la Declaración Consolidada
+ *
+ * Persistencia directa en SQLite (calificaciones_tributarias + factores_detalle).
  */
-
 const { v4: uuidv4 } = require('uuid');
 const xlsx = require('xlsx');
-const { 
-  calificaciones, 
-  persistirAuditoria, 
-  sqliteGuardarCalificacion, 
-  sqliteEliminarCalificacion 
-} = require('../models/dataStore');
+const { getDb } = require('../database/connection');
+const AppError = require('../utils/AppError');
+const { esRutValido, formatearRut } = require('../utils/rut');
+const auditService = require('./auditService');
 
-// Almacén temporal en memoria para descargas de rechazos por lote
+const FACTOR_CAMPOS = ['f08', 'f09', 'f10', 'f11', 'f12', 'f13', 'f14', 'f15', 'f16', 'f17', 'f18', 'f19'];
+const NEMOTECNICO_REGEX = /^[A-Z0-9][A-Z0-9.\-]{1,19}$/;
+
+// Caché en memoria de rechazos por lote, para la descarga posterior del CSV.
 const lotesRechazosCache = new Map();
 
 /**
- * Valida la regla fiscal: La sumatoria de factores F8 a F19 no puede superar 1.0
+ * Valida la regla fiscal: la sumatoria de factores F8 a F19 no puede superar 1.0.
  */
 function validarReglaFiscal(factores = {}) {
-  const campos = ['f08', 'f09', 'f10', 'f11', 'f12', 'f13', 'f14', 'f15', 'f16', 'f17', 'f18', 'f19'];
   let suma = 0;
-
-  for (const campo of campos) {
+  for (const campo of FACTOR_CAMPOS) {
     const val = parseFloat(factores[campo]) || 0;
     if (val < 0) {
       return { valida: false, sumaTotal: 0, error: `El factor ${campo.toUpperCase()} no puede ser negativo.` };
     }
     suma += val;
   }
-
-  // Redondeo a 6 decimales para evitar problemas de coma flotante
   suma = Math.round(suma * 1000000) / 1000000;
-
   if (suma > 1.000001) {
     return {
       valida: false,
       sumaTotal: suma,
-      error: `Violación de regla fiscal: La suma de factores F8 a F19 es ${suma.toFixed(6)}, superando el límite legal máximo de 1.000000.`
+      error: `Violación de regla fiscal: la suma de factores F8 a F19 es ${suma.toFixed(6)}, superando el límite legal máximo de 1.000000.`,
     };
   }
-
   return { valida: true, sumaTotal: suma };
 }
 
 /**
- * Parsea números considerando locale latinoamericano/español (coma decimal y punto de miles)
- * Ejemplos: "0,35" -> 0.35, "15.400.000" -> 15400000, "15.400.000,50" -> 15400000.5, 0.35 -> 0.35
+ * Parsea números considerando el locale latinoamericano (coma decimal y punto de miles).
  */
 function parsearNumero(val) {
   if (val === undefined || val === null || val === '') return 0;
@@ -74,270 +69,268 @@ function parsearNumero(val) {
 
 function obtenerValorFila(row, patrones) {
   const keys = Object.keys(row);
-  // 1. Coincidencia exacta (case-insensitive)
   for (const patron of patrones) {
-    const key = keys.find(k => k.trim().toLowerCase() === patron.trim().toLowerCase());
-    if (key && row[key] !== undefined && row[key] !== '') {
-      return row[key];
-    }
+    const key = keys.find((k) => k.trim().toLowerCase() === patron.trim().toLowerCase());
+    if (key && row[key] !== undefined && row[key] !== '') return row[key];
   }
-  // 2. Coincidencia parcial (por inclusión)
   for (const patron of patrones) {
     if (patron.length < 4) continue;
     const pLower = patron.toLowerCase();
-    const key = keys.find(k => {
+    const key = keys.find((k) => {
       const kLower = k.trim().toLowerCase();
       return kLower.includes(pLower) || pLower.includes(kLower);
     });
-    if (key && row[key] !== undefined && row[key] !== '') {
-      return row[key];
-    }
+    if (key && row[key] !== undefined && row[key] !== '') return row[key];
   }
   return '';
 }
 
 /**
- * Extrae los 12 factores fiscales (f08..f19) reconociendo variantes de encabezados
+ * Extrae los 12 factores fiscales (f08..f19) reconociendo variantes de encabezados.
  */
 function extraerFactoresFila(row) {
   const factores = {};
   const keys = Object.keys(row);
-
   for (let i = 8; i <= 19; i++) {
     const numPadded = i < 10 ? '0' + i : String(i);
     const keyCanonico = 'f' + numPadded;
-
-    // Buscar coincidencia como: f08, F08, f8, F8, o "F08 Rta Atrib"
     const regex = new RegExp(`^f0?${i}(\\b|_|\\s|$)`, 'i');
-    const matchedKey = keys.find(k => regex.test(k.trim()));
-
+    const matchedKey = keys.find((k) => regex.test(k.trim()));
     const raw = matchedKey ? row[matchedKey] : (row[keyCanonico] || row[keyCanonico.toUpperCase()] || 0);
     factores[keyCanonico] = parsearNumero(raw);
   }
-
   return factores;
 }
 
-/**
- * Obtener calificaciones filtradas estrictamente por Tenant (Corredora)
- */
+function normalizarFactores(factores = {}) {
+  const out = {};
+  for (const c of FACTOR_CAMPOS) out[c] = parseFloat(factores[c]) || 0;
+  return out;
+}
+
+function sumaFactores(factores) {
+  return Math.round(FACTOR_CAMPOS.reduce((acc, c) => acc + (parseFloat(factores[c]) || 0), 0) * 1000000) / 1000000;
+}
+
+function registrarAuditoria(usuario, ip, accion, tenant, entidadId, detalle) {
+  auditService.registrar({
+    usuario,
+    accion,
+    entidad: 'DECLARACION_TRIBUTARIA',
+    entidadId,
+    tenant,
+    detalle: detalle ? JSON.stringify(detalle) : null,
+    ip,
+  });
+}
+
+function leerFactores(db, calificacionId) {
+  const fila = db.prepare('SELECT * FROM factores_detalle WHERE calificacion_id = ?').get(calificacionId);
+  if (!fila) return normalizarFactores({});
+  const factores = {};
+  for (const c of FACTOR_CAMPOS) factores[c] = fila[c] || 0;
+  return factores;
+}
+
+function mapearCalificacion(db, fila) {
+  return {
+    ...fila,
+    no_inscrito: !!fila.no_inscrito,
+    factores: leerFactores(db, fila.id),
+  };
+}
+
 function obtenerCalificaciones(tenantId, filtro = '') {
-  let listado = calificaciones.filter(c => c.tenant_id === tenantId);
-
+  const db = getDb();
+  const condiciones = [];
+  const params = [];
+  if (tenantId) {
+    condiciones.push('tenant_id = ?');
+    params.push(tenantId);
+  }
   if (filtro && filtro.trim() !== '') {
-    const q = filtro.toLowerCase().trim();
-    listado = listado.filter(c =>
-      c.rut_cliente.toLowerCase().includes(q) ||
-      c.nemotecnico.toLowerCase().includes(q) ||
-      (c.razon_social && c.razon_social.toLowerCase().includes(q))
-    );
+    const q = `%${filtro.toLowerCase().trim()}%`;
+    condiciones.push('(lower(rut_cliente) LIKE ? OR lower(nemotecnico) LIKE ? OR lower(razon_social) LIKE ?)');
+    params.push(q, q, q);
   }
-
-  return listado;
+  const where = condiciones.length ? `WHERE ${condiciones.join(' AND ')}` : '';
+  const sql = `SELECT * FROM calificaciones_tributarias ${where} ORDER BY updated_at DESC, created_at DESC`;
+  const filas = db.prepare(sql).all(...params);
+  return filas.map((f) => mapearCalificacion(db, f));
 }
 
-/**
- * Crear calificación individual con validación tributaria y trazabilidad
- */
-function crearCalificacion(tenantId, payload, usuario = 'operador@corredora.cl') {
-  if (!payload.rut_cliente || !payload.nemotecnico || !payload.periodo_fiscal) {
-    throw new Error('RUT de cliente, nemotécnico bursátil y período fiscal son obligatorios.');
+function obtenerPorId(id, tenantId = null) {
+  const db = getDb();
+  let query = 'SELECT * FROM calificaciones_tributarias WHERE id = ?';
+  const params = [id];
+  if (tenantId) {
+    query += ' AND tenant_id = ?';
+    params.push(tenantId);
   }
+  const fila = db.prepare(query).get(...params);
+  return fila ? mapearCalificacion(db, fila) : null;
+}
 
-  const factores = payload.factores || {};
+function validarRut(rutCrudo) {
+  const rut = String(rutCrudo || '').trim().toUpperCase();
+  if (!rut) throw new AppError(400, 'RUT_REQUERIDO', 'El RUT del cliente es obligatorio.');
+  if (!esRutValido(rut)) {
+    throw new AppError(400, 'RUT_INVALIDO', `El RUT '${rut}' no es válido (dígito verificador incorrecto).`);
+  }
+  return formatearRut(rut);
+}
+
+function validarNemotecnico(nem) {
+  const nemotecnico = String(nem || '').trim().toUpperCase();
+  if (!nemotecnico) throw new AppError(400, 'NEMOTECNICO_REQUERIDO', 'El nemotécnico bursátil es obligatorio.');
+  if (!NEMOTECNICO_REGEX.test(nemotecnico)) {
+    throw new AppError(400, 'NEMOTECNICO_INVALIDO', `El nemotécnico '${nemotecnico}' no tiene un formato válido.`);
+  }
+  return nemotecnico;
+}
+
+function validarPeriodo(periodo) {
+  const anio = parseInt(periodo, 10);
+  if (!anio || anio < 2000 || anio > 2100) {
+    throw new AppError(400, 'PERIODO_INVALIDO', `El período fiscal '${periodo}' no es válido.`);
+  }
+  return anio;
+}
+
+function crearCalificacion(tenantId, payload, usuario, ip) {
+  const db = getDb();
+  const rut = validarRut(payload.rut_cliente);
+  const nemotecnico = validarNemotecnico(payload.nemotecnico);
+  const periodo = validarPeriodo(payload.periodo_fiscal);
+
+  const factores = normalizarFactores(payload.factores);
   const validacion = validarReglaFiscal(factores);
-
   if (!validacion.valida) {
-    throw new Error(validacion.error);
+    throw new AppError(400, 'REGLA_FISCAL_VIOLADA', validacion.error);
   }
 
-  // Verificar si ya existe registro único por (tenant, rut, nemotécnico, período)
-  const existe = calificaciones.find(c =>
-    c.tenant_id === tenantId &&
-    c.rut_cliente.trim().toUpperCase() === payload.rut_cliente.trim().toUpperCase() &&
-    c.nemotecnico.trim().toUpperCase() === payload.nemotecnico.trim().toUpperCase() &&
-    parseInt(c.periodo_fiscal) === parseInt(payload.periodo_fiscal)
-  );
-
-  if (existe) {
-    throw new Error(`Ya existe una calificación para el cliente ${payload.rut_cliente} en el instrumento ${payload.nemotecnico} para el período ${payload.periodo_fiscal}. Utilice la opción de edición o carga masiva (Upsert).`);
+  const existente = db
+    .prepare('SELECT id FROM calificaciones_tributarias WHERE tenant_id = ? AND rut_cliente = ? AND nemotecnico = ? AND periodo_fiscal = ?')
+    .get(tenantId, rut, nemotecnico, periodo);
+  if (existente) {
+    throw new AppError(409, 'DECLARACION_DUPLICADA', `Ya existe una declaración para ${rut} en ${nemotecnico} del período ${periodo}.`);
   }
 
-  const nuevaCalificacion = {
-    id: uuidv4(),
-    tenant_id: tenantId,
-    rut_cliente: payload.rut_cliente.trim().toUpperCase(),
-    razon_social: payload.razon_social ? payload.razon_social.trim() : 'Cliente Inversionista',
-    nemotecnico: payload.nemotecnico.trim().toUpperCase(),
-    periodo_fiscal: parseInt(payload.periodo_fiscal) || 2026,
-    modalidad: payload.modalidad === 'MONTO' ? 'MONTO' : 'FACTOR',
-    valor_nominal: parseFloat(payload.valor_nominal) || 0,
-    no_inscrito: Boolean(payload.no_inscrito),
-    factores: {
-      f08: parseFloat(factores.f08) || 0,
-      f09: parseFloat(factores.f09) || 0,
-      f10: parseFloat(factores.f10) || 0,
-      f11: parseFloat(factores.f11) || 0,
-      f12: parseFloat(factores.f12) || 0,
-      f13: parseFloat(factores.f13) || 0,
-      f14: parseFloat(factores.f14) || 0,
-      f15: parseFloat(factores.f15) || 0,
-      f16: parseFloat(factores.f16) || 0,
-      f17: parseFloat(factores.f17) || 0,
-      f18: parseFloat(factores.f18) || 0,
-      f19: parseFloat(factores.f19) || 0,
-    },
-    suma_factores: validacion.sumaTotal,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-  };
+  const id = uuidv4();
+  const modalidad = payload.modalidad === 'MONTO' ? 'MONTO' : 'FACTOR';
+  const valorNominal = parsearNumero(payload.valor_nominal);
+  const razonSocial = (payload.razon_social || '').trim() || 'Cliente Inversionista';
+  const noInscrito = payload.no_inscrito ? 1 : 0;
 
-  calificaciones.unshift(nuevaCalificacion);
-  if (typeof sqliteGuardarCalificacion === 'function') {
-    sqliteGuardarCalificacion(nuevaCalificacion);
-  }
+  const crear = db.transaction(() => {
+    db.prepare(
+      `INSERT INTO calificaciones_tributarias
+         (id, tenant_id, rut_cliente, razon_social, nemotecnico, periodo_fiscal, modalidad, valor_nominal, no_inscrito, suma_factores)
+       VALUES (@id, @tenant_id, @rut_cliente, @razon_social, @nemotecnico, @periodo_fiscal, @modalidad, @valor_nominal, @no_inscrito, @suma_factores)`
+    ).run({
+      id, tenant_id: tenantId, rut_cliente: rut, razon_social: razonSocial, nemotecnico,
+      periodo_fiscal: periodo, modalidad, valor_nominal: valorNominal, no_inscrito: noInscrito,
+      suma_factores: validacion.sumaTotal,
+    });
+    db.prepare(
+      `INSERT INTO factores_detalle (id, calificacion_id, f08, f09, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, suma_total)
+       VALUES (@id, @calificacion_id, @f08, @f09, @f10, @f11, @f12, @f13, @f14, @f15, @f16, @f17, @f18, @f19, @suma_total)`
+    ).run({ id: `fac-${id}`, calificacion_id: id, ...factores, suma_total: validacion.sumaTotal });
 
-  // Registro inmutable de auditoría
-  persistirAuditoria({
-    tenant_id: tenantId,
-    usuario,
-    accion: 'CREACION_MANUAL',
-    entidad: 'CALIFICACION_TRIBUTARIA',
-    registro_id: nuevaCalificacion.id,
-    detalle: {
-      rut_cliente: nuevaCalificacion.rut_cliente,
-      nemotecnico: nuevaCalificacion.nemotecnico,
-      suma_factores: nuevaCalificacion.suma_factores,
-      valor_nominal: nuevaCalificacion.valor_nominal
-    }
+    registrarAuditoria(usuario, ip, 'DECLARACION_CREAR', tenantId, id, {
+      rut_cliente: rut, nemotecnico, periodo_fiscal: periodo, suma_factores: validacion.sumaTotal,
+    });
   });
+  crear();
 
-  return nuevaCalificacion;
+  return mapearCalificacion(db, db.prepare('SELECT * FROM calificaciones_tributarias WHERE id = ?').get(id));
 }
 
-/**
- * Actualizar calificación existente
- */
-function actualizarCalificacion(tenantId, id, payload, usuario = 'operador@corredora.cl') {
-  const index = calificaciones.findIndex(c => c.id === id && c.tenant_id === tenantId);
-  if (index === -1) {
-    throw new Error('Calificación no encontrada o no pertenece a la corredora seleccionada.');
+function actualizarCalificacion(tenantId, id, payload, usuario, ip) {
+  const db = getDb();
+  const fila = db.prepare('SELECT * FROM calificaciones_tributarias WHERE id = ? AND tenant_id = ?').get(id, tenantId);
+  if (!fila) {
+    throw new AppError(404, 'DECLARACION_NO_ENCONTRADA', 'La declaración no existe o no pertenece a la corredora seleccionada.');
   }
 
-  const actual = calificaciones[index];
-  const factores = payload.factores ? { ...actual.factores, ...payload.factores } : actual.factores;
+  const factores = normalizarFactores(payload.factores !== undefined ? payload.factores : leerFactores(db, id));
   const validacion = validarReglaFiscal(factores);
-
   if (!validacion.valida) {
-    throw new Error(validacion.error);
+    throw new AppError(400, 'REGLA_FISCAL_VIOLADA', validacion.error);
   }
 
-  const valoresAnteriores = {
-    suma_factores: actual.suma_factores,
-    valor_nominal: actual.valor_nominal,
-    modalidad: actual.modalidad
-  };
+  const modalidad = payload.modalidad !== undefined ? (payload.modalidad === 'MONTO' ? 'MONTO' : 'FACTOR') : fila.modalidad;
+  const valorNominal = payload.valor_nominal !== undefined ? parsearNumero(payload.valor_nominal) : fila.valor_nominal;
+  const razonSocial = payload.razon_social !== undefined ? payload.razon_social.trim() : fila.razon_social;
+  const noInscrito = payload.no_inscrito !== undefined ? (payload.no_inscrito ? 1 : 0) : fila.no_inscrito;
 
-  actual.modalidad = payload.modalidad || actual.modalidad;
-  actual.valor_nominal = payload.valor_nominal !== undefined ? parseFloat(payload.valor_nominal) : actual.valor_nominal;
-  actual.no_inscrito = payload.no_inscrito !== undefined ? Boolean(payload.no_inscrito) : actual.no_inscrito;
-  actual.razon_social = payload.razon_social || actual.razon_social;
-  actual.factores = {
-    f08: parseFloat(factores.f08) || 0,
-    f09: parseFloat(factores.f09) || 0,
-    f10: parseFloat(factores.f10) || 0,
-    f11: parseFloat(factores.f11) || 0,
-    f12: parseFloat(factores.f12) || 0,
-    f13: parseFloat(factores.f13) || 0,
-    f14: parseFloat(factores.f14) || 0,
-    f15: parseFloat(factores.f15) || 0,
-    f16: parseFloat(factores.f16) || 0,
-    f17: parseFloat(factores.f17) || 0,
-    f18: parseFloat(factores.f18) || 0,
-    f19: parseFloat(factores.f19) || 0,
-  };
-  actual.suma_factores = validacion.sumaTotal;
-  actual.updated_at = new Date().toISOString();
-  if (typeof sqliteGuardarCalificacion === 'function') {
-    sqliteGuardarCalificacion(actual);
-  }
+  const antes = { suma_factores: fila.suma_factores, valor_nominal: fila.valor_nominal, modalidad: fila.modalidad };
 
-  persistirAuditoria({
-    tenant_id: tenantId,
-    usuario,
-    accion: 'ACTUALIZACION_MANUAL',
-    entidad: 'CALIFICACION_TRIBUTARIA',
-    registro_id: actual.id,
-    detalle: {
-      rut_cliente: actual.rut_cliente,
-      nemotecnico: actual.nemotecnico,
-      antes: valoresAnteriores,
-      despues: {
-        suma_factores: actual.suma_factores,
-        valor_nominal: actual.valor_nominal
-      }
-    }
+  const actualizar = db.transaction(() => {
+    db.prepare(
+      `UPDATE calificaciones_tributarias
+       SET razon_social = @razon_social, modalidad = @modalidad, valor_nominal = @valor_nominal,
+           no_inscrito = @no_inscrito, suma_factores = @suma_factores, updated_at = CURRENT_TIMESTAMP
+       WHERE id = @id`
+    ).run({ razon_social: razonSocial, modalidad, valor_nominal: valorNominal, no_inscrito: noInscrito, suma_factores: validacion.sumaTotal, id });
+    db.prepare(
+      `UPDATE factores_detalle SET f08 = @f08, f09 = @f09, f10 = @f10, f11 = @f11, f12 = @f12,
+         f13 = @f13, f14 = @f14, f15 = @f15, f16 = @f16, f17 = @f17, f18 = @f18, f19 = @f19, suma_total = @suma_total
+       WHERE calificacion_id = @calificacion_id`
+    ).run({ ...factores, suma_total: validacion.sumaTotal, calificacion_id: id });
+
+    registrarAuditoria(usuario, ip, 'DECLARACION_ACTUALIZAR', tenantId, id, {
+      rut_cliente: fila.rut_cliente, nemotecnico: fila.nemotecnico, antes,
+      despues: { suma_factores: validacion.sumaTotal, valor_nominal: valorNominal },
+    });
   });
+  actualizar();
 
-  return actual;
+  return mapearCalificacion(db, db.prepare('SELECT * FROM calificaciones_tributarias WHERE id = ?').get(id));
 }
 
-/**
- * Eliminar calificación individual
- */
-function eliminarCalificacion(tenantId, id, usuario = 'operador@corredora.cl') {
-  const index = calificaciones.findIndex(c => c.id === id && c.tenant_id === tenantId);
-  if (index === -1) {
-    throw new Error('Calificación no encontrada o no pertenece a la corredora seleccionada.');
+function eliminarCalificacion(tenantId, id, usuario, ip) {
+  const db = getDb();
+  const fila = db.prepare('SELECT * FROM calificaciones_tributarias WHERE id = ? AND tenant_id = ?').get(id, tenantId);
+  if (!fila) {
+    throw new AppError(404, 'DECLARACION_NO_ENCONTRADA', 'La declaración no existe o no pertenece a la corredora seleccionada.');
   }
 
-  const eliminada = calificaciones.splice(index, 1)[0];
-  if (typeof sqliteEliminarCalificacion === 'function') {
-    sqliteEliminarCalificacion(id);
-  }
-
-  persistirAuditoria({
-    tenant_id: tenantId,
-    usuario,
-    accion: 'ELIMINACION',
-    entidad: 'CALIFICACION_TRIBUTARIA',
-    registro_id: id,
-    detalle: {
-      rut_cliente: eliminada.rut_cliente,
-      nemotecnico: eliminada.nemotecnico
-    }
+  const eliminar = db.transaction(() => {
+    db.prepare('DELETE FROM calificaciones_tributarias WHERE id = ?').run(id);
+    registrarAuditoria(usuario, ip, 'DECLARACION_ELIMINAR', tenantId, id, {
+      rut_cliente: fila.rut_cliente, nemotecnico: fila.nemotecnico, periodo_fiscal: fila.periodo_fiscal,
+    });
   });
+  eliminar();
 
   return { success: true, id };
 }
 
 /**
- * Ingesta Masiva Inteligente con Lógica Upsert
- * Procesa archivos CSV o Excel (XLSX)
- * No frena el lote completo si una fila falla; aísla los rechazos para descarga posterior.
+ * Carga masiva de declaraciones: parsea CSV/XLSX, valida cada fila y aísla los
+ * rechazos; los registros válidos se aplican en una única transacción (upsert).
  */
-function procesarCargaMasiva(tenantId, fileBuffer, filename, usuario = 'operador@corredora.cl') {
+function procesarCargaMasiva(tenantId, fileBuffer, filename, usuario, ip) {
   let rows = [];
-
   try {
     const workbook = xlsx.read(fileBuffer, { type: 'buffer' });
     const firstSheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[firstSheetName];
     rows = xlsx.utils.sheet_to_json(worksheet, { defval: '' });
   } catch (err) {
-    throw new Error('No se pudo leer el archivo. Asegúrese de que sea un formato CSV o XLSX válido.');
+    throw new AppError(400, 'ARCHIVO_ILEGIBLE', 'No se pudo leer el archivo. Asegúrese de que sea un formato CSV o XLSX válido.');
   }
 
   if (!rows || rows.length === 0) {
-    throw new Error('El archivo cargado se encuentra vacío.');
+    throw new AppError(400, 'ARCHIVO_VACIO', 'El archivo cargado se encuentra vacío.');
   }
 
-  let insertados = 0;
-  let actualizados = 0;
   const rechazadosList = [];
+  const validos = [];
 
   rows.forEach((row, idx) => {
-    const numeroFila = idx + 2; // +2 considerando encabezado base 1
+    const numeroFila = idx + 2;
 
     const rawRut = obtenerValorFila(row, ['rut_cliente', 'RUT_CLIENTE', 'RUT', 'rut', 'Rut', 'RUT Cliente', 'rut cliente', 'rut titular', 'identificacion']);
     const rawNemo = obtenerValorFila(row, ['nemotecnico', 'NEMOTECNICO', 'nemotécnico', 'Nemotécnico', 'instrumento', 'Instrumento', 'nemo', 'Nemo', 'ticker', 'Ticker', 'accion', 'Accion']);
@@ -347,101 +340,108 @@ function procesarCargaMasiva(tenantId, fileBuffer, filename, usuario = 'operador
     const rawRazon = obtenerValorFila(row, ['razon_social', 'RAZON_SOCIAL', 'Razón Social', 'razon social', 'Razón Social Inversionista', 'razon social inversionista', 'inversionista', 'Inversionista', 'cliente', 'Cliente', 'Nombre', 'nombre']);
     const rawNoInscrito = obtenerValorFila(row, ['no_inscrito', 'NO_INSCRITO', 'No Inscrito', 'no inscrito']);
 
-    const rut = rawRut.toString().trim().toUpperCase();
-    const nemotecnico = rawNemo.toString().trim().toUpperCase();
-    const periodo = parseInt(rawPeriodo) || 2026;
-    const modalidad = (rawModalidad.toString().trim().toUpperCase() === 'MONTO') ? 'MONTO' : 'FACTOR';
+    const rutCrudo = String(rawRut).trim().toUpperCase();
+    const nemCrudo = String(rawNemo).trim().toUpperCase();
+
+    if (!rutCrudo || !nemCrudo) {
+      rechazadosList.push({
+        fila: numeroFila,
+        rut: rutCrudo || 'SIN RUT',
+        nemotecnico: nemCrudo || 'SIN NEMOTECNICO',
+        motivo: 'Campos obligatorios faltantes: RUT o nemotécnico no informados.',
+      });
+      return;
+    }
+
+    if (!esRutValido(rutCrudo)) {
+      rechazadosList.push({ fila: numeroFila, rut: rutCrudo, nemotecnico: nemCrudo, motivo: `RUT '${rutCrudo}' no válido (dígito verificador incorrecto).` });
+      return;
+    }
+    const rut = formatearRut(rutCrudo);
+
+    if (!NEMOTECNICO_REGEX.test(nemCrudo)) {
+      rechazadosList.push({ fila: numeroFila, rut, nemotecnico: nemCrudo, motivo: `Nemotécnico '${nemCrudo}' no tiene un formato válido.` });
+      return;
+    }
+
+    const periodo = parseInt(rawPeriodo, 10);
+    if (!periodo || periodo < 2000 || periodo > 2100) {
+      rechazadosList.push({ fila: numeroFila, rut, nemotecnico: nemCrudo, motivo: `Período fiscal '${rawPeriodo}' no válido.` });
+      return;
+    }
+
+    const modalidad = String(rawModalidad).trim().toUpperCase() === 'MONTO' ? 'MONTO' : 'FACTOR';
     const valorNominal = parsearNumero(rawValor);
-    const razonSocial = rawRazon ? rawRazon.toString().trim() : 'Cliente Inversionista';
+    const razonSocial = rawRazon ? String(rawRazon).trim() : 'Cliente Inversionista';
     const noInscrito = Boolean(rawNoInscrito === 'true' || rawNoInscrito === true || rawNoInscrito === 1 || rawNoInscrito === '1' || rawNoInscrito === 'SI');
 
-    if (!rut || !nemotecnico) {
-      rechazadosList.push({
-        fila: numeroFila,
-        rut: rut || 'SIN RUT',
-        nemotecnico: nemotecnico || 'SIN NEMOTECNICO',
-        motivo: 'Campos obligatorios faltantes: RUT o Nemotécnico no informados.'
-      });
-      return;
-    }
-
     const factores = extraerFactoresFila(row);
-
     const validacion = validarReglaFiscal(factores);
     if (!validacion.valida) {
-      rechazadosList.push({
-        fila: numeroFila,
-        rut,
-        nemotecnico,
-        motivo: validacion.error
-      });
+      rechazadosList.push({ fila: numeroFila, rut, nemotecnico: nemCrudo, motivo: validacion.error });
       return;
     }
 
-    // Comprobar si ya existe para aplicar UPSERT (Update o Insert)
-    const existente = calificaciones.find(c =>
-      c.tenant_id === tenantId &&
-      c.rut_cliente === rut &&
-      c.nemotecnico === nemotecnico &&
-      parseInt(c.periodo_fiscal) === periodo
+    validos.push({ numeroFila, rut, nemotecnico: nemCrudo, periodo, modalidad, valorNominal, razonSocial, noInscrito, factores, suma: validacion.sumaTotal });
+  });
+
+  const db = getDb();
+  let insertados = 0;
+  let actualizados = 0;
+
+  const upsert = db.transaction(() => {
+    const selectExistente = db.prepare(
+      'SELECT id FROM calificaciones_tributarias WHERE tenant_id = ? AND rut_cliente = ? AND nemotecnico = ? AND periodo_fiscal = ?'
+    );
+    const insertCal = db.prepare(
+      `INSERT INTO calificaciones_tributarias
+         (id, tenant_id, rut_cliente, razon_social, nemotecnico, periodo_fiscal, modalidad, valor_nominal, no_inscrito, suma_factores)
+       VALUES (@id, @tenant_id, @rut_cliente, @razon_social, @nemotecnico, @periodo_fiscal, @modalidad, @valor_nominal, @no_inscrito, @suma_factores)`
+    );
+    const updateCal = db.prepare(
+      `UPDATE calificaciones_tributarias
+       SET razon_social = @razon_social, modalidad = @modalidad, valor_nominal = @valor_nominal,
+           no_inscrito = @no_inscrito, suma_factores = @suma_factores, updated_at = CURRENT_TIMESTAMP
+       WHERE id = @id`
+    );
+    const insertFac = db.prepare(
+      `INSERT INTO factores_detalle (id, calificacion_id, f08, f09, f10, f11, f12, f13, f14, f15, f16, f17, f18, f19, suma_total)
+       VALUES (@id, @calificacion_id, @f08, @f09, @f10, @f11, @f12, @f13, @f14, @f15, @f16, @f17, @f18, @f19, @suma_total)`
+    );
+    const updateFac = db.prepare(
+      `UPDATE factores_detalle SET f08 = @f08, f09 = @f09, f10 = @f10, f11 = @f11, f12 = @f12,
+         f13 = @f13, f14 = @f14, f15 = @f15, f16 = @f16, f17 = @f17, f18 = @f18, f19 = @f19, suma_total = @suma_total
+       WHERE calificacion_id = @calificacion_id`
     );
 
-    if (existente) {
-      // ACCIÓN UPDATE (Upsert)
-      const antes = { suma_factores: existente.suma_factores, valor_nominal: existente.valor_nominal };
-      existente.modalidad = modalidad;
-      existente.valor_nominal = valorNominal;
-      existente.razon_social = razonSocial;
-      existente.no_inscrito = noInscrito;
-      existente.factores = factores;
-      existente.suma_factores = validacion.sumaTotal;
-      existente.updated_at = new Date().toISOString();
-      actualizados++;
-      if (typeof sqliteGuardarCalificacion === 'function') {
-        sqliteGuardarCalificacion(existente);
+    for (const v of validos) {
+      const existente = selectExistente.get(tenantId, v.rut, v.nemotecnico, v.periodo);
+      if (existente) {
+        updateCal.run({
+          id: existente.id, razon_social: v.razonSocial, modalidad: v.modalidad,
+          valor_nominal: v.valorNominal, no_inscrito: v.noInscrito ? 1 : 0, suma_factores: v.suma,
+        });
+        updateFac.run({ ...v.factores, suma_total: v.suma, calificacion_id: existente.id });
+        actualizados++;
+        registrarAuditoria(usuario, ip, 'CARGA_MASIVA_ACTUALIZAR', tenantId, existente.id, {
+          rut_cliente: v.rut, nemotecnico: v.nemotecnico, fila: v.numeroFila, suma: v.suma,
+        });
+      } else {
+        const id = uuidv4();
+        insertCal.run({
+          id, tenant_id: tenantId, rut_cliente: v.rut, razon_social: v.razonSocial, nemotecnico: v.nemotecnico,
+          periodo_fiscal: v.periodo, modalidad: v.modalidad, valor_nominal: v.valorNominal,
+          no_inscrito: v.noInscrito ? 1 : 0, suma_factores: v.suma,
+        });
+        insertFac.run({ id: `fac-${id}`, calificacion_id: id, ...v.factores, suma_total: v.suma });
+        insertados++;
+        registrarAuditoria(usuario, ip, 'CARGA_MASIVA_INSERTAR', tenantId, id, {
+          rut_cliente: v.rut, nemotecnico: v.nemotecnico, fila: v.numeroFila, suma: v.suma,
+        });
       }
-
-      persistirAuditoria({
-        tenant_id: tenantId,
-        usuario,
-        accion: 'UPSERT_UPDATE',
-        entidad: 'CALIFICACION_TRIBUTARIA',
-        registro_id: existente.id,
-        detalle: { rut, nemotecnico, fila: numeroFila, antes, despues: { suma: validacion.sumaTotal, valor: valorNominal } }
-      });
-    } else {
-      // ACCIÓN INSERT (Upsert)
-      const nueva = {
-        id: uuidv4(),
-        tenant_id: tenantId,
-        rut_cliente: rut,
-        razon_social: razonSocial,
-        nemotecnico,
-        periodo_fiscal: periodo,
-        modalidad,
-        valor_nominal: valorNominal,
-        no_inscrito: noInscrito,
-        factores,
-        suma_factores: validacion.sumaTotal,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      calificaciones.unshift(nueva);
-      insertados++;
-      if (typeof sqliteGuardarCalificacion === 'function') {
-        sqliteGuardarCalificacion(nueva);
-      }
-
-      persistirAuditoria({
-        tenant_id: tenantId,
-        usuario,
-        accion: 'UPSERT_INSERT',
-        entidad: 'CALIFICACION_TRIBUTARIA',
-        registro_id: nueva.id,
-        detalle: { rut, nemotecnico, fila: numeroFila, suma: validacion.sumaTotal }
-      });
     }
   });
+  upsert();
 
   const batchId = uuidv4();
   if (rechazadosList.length > 0) {
@@ -455,162 +455,90 @@ function procesarCargaMasiva(tenantId, fileBuffer, filename, usuario = 'operador
     insertados,
     actualizados,
     rechazados: rechazadosList.length,
-    rechazadosList
+    rechazadosList,
   };
 }
 
 /**
- * Genera el CSV de filas rechazadas para descarga del operador (Compatible Excel Mac/Windows)
+ * Genera el CSV de filas rechazadas para descarga del operador (compatible Excel).
  */
 function generarCsvRechazos(batchId) {
   const rechazados = lotesRechazosCache.get(batchId) || [];
-  if (rechazados.length === 0) {
-    return 'sep=,\r\nfila,rut_cliente,nemotecnico,motivo_rechazo\r\n';
-  }
-
   let csv = 'sep=,\r\nfila,rut_cliente,nemotecnico,motivo_rechazo\r\n';
   for (const r of rechazados) {
-    const motivoLimpio = `"${r.motivo.replace(/"/g, '""')}"`;
+    const motivoLimpio = `"${String(r.motivo).replace(/"/g, '""')}"`;
     csv += `${r.fila},${r.rut},${r.nemotecnico},${motivoLimpio}\r\n`;
   }
   return csv;
 }
 
-/**
- * Genera el archivo CSV consolidado oficial de Declaración Jurada (Compatible Excel Mac/Windows)
- */
 function exportarDeclaracionOficial(tenantId) {
   const data = obtenerCalificaciones(tenantId);
-  let csv = 'sep=,\r\nRUT_CLIENTE,RAZON_SOCIAL,NEMOTECNICO,PERIODO_FISCAL,MODALIDAD,VALOR_NOMINAL,SUMA_FACTORES,F08,F09,F10,F11,F12,F13,F14,F15,F16,F17,F18,F19,NO_INSCRITO,FECHA_REGISTRO\r\n';
-
+  let csv = '\uFEFFsep=,\r\nRUT_CLIENTE,RAZON_SOCIAL,NEMOTECNICO,PERIODO_FISCAL,MODALIDAD,VALOR_NOMINAL,SUMA_FACTORES,F08,F09,F10,F11,F12,F13,F14,F15,F16,F17,F18,F19,NO_INSCRITO,FECHA_REGISTRO\r\n';
   for (const c of data) {
     const f = c.factores || {};
-    csv += `${c.rut_cliente},"${c.razon_social}",${c.nemotecnico},${c.periodo_fiscal},${c.modalidad},${c.valor_nominal},${c.suma_factores},${f.f08||0},${f.f09||0},${f.f10||0},${f.f11||0},${f.f12||0},${f.f13||0},${f.f14||0},${f.f15||0},${f.f16||0},${f.f17||0},${f.f18||0},${f.f19||0},${c.no_inscrito},${c.created_at}\r\n`;
+    csv += `${c.rut_cliente},"${c.razon_social}",${c.nemotecnico},${c.periodo_fiscal},${c.modalidad},${c.valor_nominal},${c.suma_factores},${f.f08 || 0},${f.f09 || 0},${f.f10 || 0},${f.f11 || 0},${f.f12 || 0},${f.f13 || 0},${f.f14 || 0},${f.f15 || 0},${f.f16 || 0},${f.f17 || 0},${f.f18 || 0},${f.f19 || 0},${c.no_inscrito ? 'SI' : 'NO'},${c.created_at}\r\n`;
   }
-
   return csv;
 }
 
-/**
- * Genera el archivo Excel (.xlsx) oficial de Declaración Jurada para una corredora
- */
 function exportarDeclaracionExcel(tenantId) {
   const data = obtenerCalificaciones(tenantId);
   const rows = [
-    [
-      'RUT_CLIENTE', 'RAZON_SOCIAL', 'NEMOTECNICO', 'PERIODO_FISCAL', 'MODALIDAD',
-      'VALOR_NOMINAL', 'SUMA_FACTORES', 'F08', 'F09', 'F10', 'F11', 'F12',
-      'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'NO_INSCRITO', 'FECHA_REGISTRO'
-    ]
+    ['RUT_CLIENTE', 'RAZON_SOCIAL', 'NEMOTECNICO', 'PERIODO_FISCAL', 'MODALIDAD', 'VALOR_NOMINAL', 'SUMA_FACTORES', 'F08', 'F09', 'F10', 'F11', 'F12', 'F13', 'F14', 'F15', 'F16', 'F17', 'F18', 'F19', 'NO_INSCRITO', 'FECHA_REGISTRO'],
   ];
-
   for (const c of data) {
     const f = c.factores || {};
     rows.push([
-      c.rut_cliente,
-      c.razon_social || '',
-      c.nemotecnico,
-      c.periodo_fiscal,
-      c.modalidad,
-      c.valor_nominal || 0,
-      c.suma_factores || 0,
+      c.rut_cliente, c.razon_social || '', c.nemotecnico, c.periodo_fiscal, c.modalidad,
+      c.valor_nominal || 0, c.suma_factores || 0,
       f.f08 || 0, f.f09 || 0, f.f10 || 0, f.f11 || 0, f.f12 || 0,
       f.f13 || 0, f.f14 || 0, f.f15 || 0, f.f16 || 0, f.f17 || 0, f.f18 || 0, f.f19 || 0,
-      c.no_inscrito ? 'SI' : 'NO',
-      c.created_at || ''
+      c.no_inscrito ? 'SI' : 'NO', c.created_at || '',
     ]);
   }
-
   const wb = xlsx.utils.book_new();
   const ws = xlsx.utils.aoa_to_sheet(rows);
   ws['!cols'] = [
-    { wch: 14 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 12 },
-    { wch: 16 }, { wch: 14 },
+    { wch: 14 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }, { wch: 14 },
     { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
     { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
-    { wch: 12 }, { wch: 22 }
+    { wch: 12 }, { wch: 22 },
   ];
   xlsx.utils.book_append_sheet(wb, ws, 'Declaracion_Consolidada');
   return xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
 
 /**
- * Genera la plantilla Excel oficial (.xlsx) formateada para importación
+ * Genera la plantilla Excel oficial (.xlsx) para la carga masiva de declaraciones.
+ * Los RUT de ejemplo poseen dígito verificador válido (módulo 11).
  */
 function generarPlantillaExcel() {
   const rows = [
-    [
-      'rut_cliente', 'razon_social', 'nemotecnico', 'periodo_fiscal', 'modalidad',
-      'valor_nominal', 'no_inscrito', 'f08', 'f09', 'f10', 'f11', 'f12',
-      'f13', 'f14', 'f15', 'f16', 'f17', 'f18', 'f19'
-    ],
-    ['76.123.456-7', 'Inversiones Los Andes SpA', 'CHILE', 2026, 'FACTOR', 15400000, false, 0.35, 0.15, 0.10, 0.05, 0.00, 0.12, 0.00, 0.00, 0.00, 0.00, 0.00, 0.03],
-    ['88.999.000-1', 'Renta Global Fondos Mutuos', 'SQM-B', 2026, 'FACTOR', 35000000, false, 0.30, 0.20, 0.10, 0.10, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.05],
-    ['99.111.222-3', 'Inmobiliaria El Roble Ltda', 'FALABELLA', 2026, 'MONTO', 12000000, false, 0.35, 0.15, 0.10, 0.10, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
-    ['11.222.333-4', 'Empresas Delta S.A.', 'CMPC', 2026, 'FACTOR', 18000000, false, 0.30, 0.25, 0.15, 0.10, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.10]
+    ['rut_cliente', 'razon_social', 'nemotecnico', 'periodo_fiscal', 'modalidad', 'valor_nominal', 'no_inscrito', 'f08', 'f09', 'f10', 'f11', 'f12', 'f13', 'f14', 'f15', 'f16', 'f17', 'f18', 'f19'],
+    ['76.123.456-0', 'Inversiones Los Andes SpA', 'CHILE', 2026, 'FACTOR', 15400000, false, 0.35, 0.15, 0.10, 0.05, 0.00, 0.12, 0.00, 0.00, 0.00, 0.00, 0.00, 0.03],
+    ['88.999.000-7', 'Renta Global Fondos Mutuos', 'SQM-B', 2026, 'FACTOR', 35000000, false, 0.30, 0.20, 0.10, 0.10, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.05],
+    ['99.111.222-7', 'Inmobiliaria El Roble Ltda', 'FALABELLA', 2026, 'MONTO', 12000000, false, 0.35, 0.15, 0.10, 0.10, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
+    ['11.222.333-9', 'Empresas Delta S.A.', 'CENCOSUD', 2026, 'FACTOR', 18000000, false, 0.30, 0.25, 0.15, 0.10, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.10],
   ];
-
   const wb = xlsx.utils.book_new();
   const ws = xlsx.utils.aoa_to_sheet(rows);
   ws['!cols'] = [
-    { wch: 15 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 12 },
-    { wch: 15 }, { wch: 12 },
+    { wch: 15 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 15 }, { wch: 12 },
     { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
-    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }
-  ];
-  xlsx.utils.book_append_sheet(wb, ws, 'Plantilla_Calificaciones');
-  return xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
-}
-
-/**
- * Genera lotes de prueba listos para demostraciones
- * @param {boolean} conRechazo Si es true, incluye 1 fila con factores que suman 1.25 para demostrar el log de rechazos
- */
-function generarLotePrueba(conRechazo = false, formato = 'xlsx') {
-  const rows = [
-    [
-      'rut_cliente', 'razon_social', 'nemotecnico', 'periodo_fiscal', 'modalidad',
-      'valor_nominal', 'no_inscrito', 'f08', 'f09', 'f10', 'f11', 'f12',
-      'f13', 'f14', 'f15', 'f16', 'f17', 'f18', 'f19'
-    ],
-    ['76.123.456-7', 'Inversiones Los Andes SpA', 'CHILE', 2026, 'FACTOR', 20000000, false, 0.40, 0.20, 0.10, 0.05, 0.00, 0.15, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
-    ['55.444.333-2', 'Nuevo Holding Andino SpA', 'ENELAM', 2026, 'FACTOR', 8000000, false, 0.30, 0.20, 0.10, 0.00, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00],
-    ['88.999.000-1', 'Renta Global Fondos Mutuos', 'SQM-B', 2026, 'FACTOR', 35000000, false, 0.30, 0.20, 0.10, 0.10, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.05],
-    ['99.111.222-3', 'Inmobiliaria El Roble Ltda', 'FALABELLA', 2026, 'MONTO', 12000000, false, 0.35, 0.15, 0.10, 0.10, 0.00, 0.10, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00]
-  ];
-
-  if (conRechazo) {
-    // Fila 5: F08(0.70) + F09(0.40) + F10(0.15) = 1.25 > 1.0 (Provoca rechazo intencional para demostrar aislamiento)
-    rows.push([
-      '66.555.444-1', 'Cliente Caso Rechazo', 'CMPC', 2026, 'FACTOR',
-      1000000, false, 0.70, 0.40, 0.15, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00
-    ]);
-  }
-
-  if (formato === 'csv') {
-    let csv = '';
-    rows.forEach(r => {
-      csv += r.map(c => typeof c === 'string' && c.includes(' ') ? `"${c}"` : c).join(',') + '\n';
-    });
-    return csv;
-  }
-
-  const wb = xlsx.utils.book_new();
-  const ws = xlsx.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [
-    { wch: 15 }, { wch: 30 }, { wch: 14 }, { wch: 14 }, { wch: 12 },
-    { wch: 15 }, { wch: 12 },
     { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 },
-    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }
   ];
-  xlsx.utils.book_append_sheet(wb, ws, conRechazo ? 'Lote_Con_Rechazo' : 'Lote_Valido');
+  xlsx.utils.book_append_sheet(wb, ws, 'Plantilla_Declaraciones');
   return xlsx.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
 
 module.exports = {
   validarReglaFiscal,
   parsearNumero,
+  obtenerValorFila,
+  extraerFactoresFila,
   obtenerCalificaciones,
+  obtenerPorId,
   crearCalificacion,
   actualizarCalificacion,
   eliminarCalificacion,
@@ -619,5 +547,4 @@ module.exports = {
   exportarDeclaracionOficial,
   exportarDeclaracionExcel,
   generarPlantillaExcel,
-  generarLotePrueba
 };

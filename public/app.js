@@ -6,21 +6,63 @@
 let corredoras = [];
 let tenantActivo = null;
 let corredoraActual = null;
+const NOMBRES_CORREDORAS = {
+  'corr-lv-01': { id: 'corr-lv-01', nombre: 'LarraínVial Corredora de Bolsa', codigo: 'LARRAIN_VIAL', initials: 'LV' },
+  'corr-bc-02': { id: 'corr-bc-02', nombre: 'Banchile Inversiones Corredores de Bolsa', codigo: 'BANCHILE', initials: 'BC' },
+  'corr-cc-03': { id: 'corr-cc-03', nombre: 'Credicorp Capital Bolsa', codigo: 'CREDICORP', initials: 'CC' },
+  'GLOBAL': { id: 'GLOBAL', nombre: 'nuam exchange • Consola Regional', codigo: 'GLOBAL', initials: 'NM' }
+};
 let calificacionesActuales = [];
 let batchIdRechazosActivo = null;
 let filtroModalidadActivo = 'TODOS';
 let usuariosActuales = [];
 let filtroUsuarioRangoActivo = 'TODOS';
 
+function getAuthToken() {
+  return sessionStorage.getItem('nuam_token') || '';
+}
+
+async function authFetch(url, options = {}) {
+  const token = getAuthToken();
+  const headers = { ...(options.headers || {}) };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(url, { ...options, headers });
+  if (res.status === 401) {
+    cerrarSesion();
+    throw new Error('Sesión no autorizada o expirada.');
+  }
+  return res;
+}
+
+function getRangoActual() {
+  return sessionStorage.getItem('nuam_user_rank') || 'ADMIN_NUAM';
+}
+
+function esUsuarioAdmin() {
+  const r = getRangoActual();
+  return r === 'ADMIN_NUAM' || r === 'SUPER_ADMIN';
+}
+
+function esUsuarioAuditor() {
+  const r = getRangoActual();
+  return r === 'REGULADOR_CMF' || r === 'OFICIAL_CUMPLIMIENTO' || r === 'AUDITOR_CMF';
+}
+
+function esUsuarioOperador() {
+  const r = getRangoActual();
+  return r === 'OPERADOR_CORREDORA' || r === 'OPERADOR_SENIOR' || r === 'ADMIN_CORREDORA';
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
   if (window.lucide) lucide.createIcons();
-  await cargarCorredoras();
   
   // Verificar si hay sesión activa en sessionStorage
-  if (sessionStorage.getItem('nuam_auth') === 'true') {
+  if (sessionStorage.getItem('nuam_token') && sessionStorage.getItem('nuam_auth') === 'true') {
     const savedTenant = sessionStorage.getItem('nuam_tenant');
     if (savedTenant) tenantActivo = savedTenant;
-    mostrarIntranet();
+    await mostrarIntranet();
   } else {
     mostrarLanding();
   }
@@ -32,7 +74,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Cargar Corredoras (Tenants) en Navbar y Formulario de Login
 async function cargarCorredoras() {
   try {
-    const res = await fetch('/api/corredoras');
+    const res = await authFetch('/api/corredoras');
     const json = await res.json();
     if (json.success) {
       corredoras = json.data;
@@ -41,10 +83,16 @@ async function cargarCorredoras() {
       const selectIntranet = document.getElementById('tenantSelect');
       if (selectIntranet) {
         selectIntranet.innerHTML = '';
+        const r = getRangoActual();
+        const esAdmin = esUsuarioAdmin();
         corredoras.forEach(c => {
           const opt = document.createElement('option');
           opt.value = c.id;
-          opt.textContent = `${c.nombre}`;
+          let label = c.nombre;
+          if (c.id === 'GLOBAL' && (esAdmin || r === 'OFICIAL_CUMPLIMIENTO')) {
+            label = 'nuam exchange • Consola Regional';
+          }
+          opt.textContent = label;
           selectIntranet.appendChild(opt);
         });
 
@@ -65,8 +113,7 @@ async function cargarCorredoras() {
 async function cambiarTenant(nuevoTenantId) {
   if (!nuevoTenantId) return;
 
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'OPERADOR_SENIOR' || rango === 'ADMIN_CORREDORA') {
+  if (esUsuarioOperador()) {
     const selectIntranet = document.getElementById('tenantSelect');
     if (selectIntranet && tenantActivo) selectIntranet.value = tenantActivo;
     mostrarAlerta('Aislamiento Multitenant: Su cuenta institucional está asignada exclusivamente a su corredora y no puede conmutar a otra entidad.', 'error');
@@ -84,68 +131,71 @@ async function cambiarTenant(nuevoTenantId) {
   }
 }
 
-// Control de Sesión B2B Conectado al Catálogo Real RBAC
+// Control de Sesión B2B Conectado al Backend Real REST
 async function iniciarSesion(e) {
   if (e) e.preventDefault();
   const inputUsuario = document.getElementById('loginUsuario');
-  const emailInput = (inputUsuario && inputUsuario.value.trim()) ? inputUsuario.value.trim().toLowerCase() : '';
+  const inputPassword = document.getElementById('loginPassword');
+  const email = (inputUsuario && inputUsuario.value.trim()) ? inputUsuario.value.trim().toLowerCase() : '';
+  const password = (inputPassword && inputPassword.value) ? inputPassword.value : '';
 
-  // 1. Cargar usuarios si aún no están en memoria
-  if (usuariosActuales.length === 0) {
-    try {
-      const res = await fetch('/api/usuarios');
-      const json = await res.json();
-      if (json.success) usuariosActuales = json.data;
-    } catch (err) {
-      console.warn('Error precargando usuarios en login:', err);
-    }
+  if (!email || !password) {
+    mostrarAlerta('Por favor complete su correo y contraseña.', 'error');
+    return;
   }
 
-  // 2. Buscar si el correo ingresado corresponde a un usuario del catálogo RBAC
-  const userEncontrado = usuariosActuales.find(u => u.email.toLowerCase() === emailInput);
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    const json = await res.json();
 
-  if (userEncontrado) {
-    // Usuario institucional reconocido
+    if (!res.ok || !json.success) {
+      const msg = (json.error && json.error.message) || 'Error al iniciar sesión.';
+      mostrarAlerta(msg, 'error');
+      return;
+    }
+
+    const { token, usuario } = json.data;
     sessionStorage.setItem('nuam_auth', 'true');
-    sessionStorage.setItem('nuam_user', userEncontrado.nombre);
-    sessionStorage.setItem('nuam_user_email', userEncontrado.email);
-    sessionStorage.setItem('nuam_user_cargo', userEncontrado.cargo);
-    sessionStorage.setItem('nuam_user_rank', userEncontrado.rango);
-    sessionStorage.setItem('nuam_user_initials', userEncontrado.avatar || userEncontrado.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase());
+    sessionStorage.setItem('nuam_token', token);
+    sessionStorage.setItem('nuam_user', usuario.nombre);
+    sessionStorage.setItem('nuam_user_email', usuario.email);
+    sessionStorage.setItem('nuam_user_cargo', usuario.cargo || usuario.rol);
+    sessionStorage.setItem('nuam_user_rank', usuario.rol);
+    sessionStorage.setItem('nuam_user_initials', usuario.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase());
+    sessionStorage.setItem('nuam_user_permissions', JSON.stringify(usuario.permissions || []));
 
-    // Asignar automáticamente el tenant de la corredora del usuario
-    if (userEncontrado.tenant_id && userEncontrado.tenant_id !== 'GLOBAL') {
-      tenantActivo = userEncontrado.tenant_id;
+    if (usuario.tenant_id && usuario.tenant_id !== 'GLOBAL') {
+      tenantActivo = usuario.tenant_id;
     } else {
-      tenantActivo = 'corr-lv-01'; // Default inicial para auditores globales
+      tenantActivo = 'corr-lv-01';
     }
     sessionStorage.setItem('nuam_tenant', tenantActivo);
 
-  } else {
-    // Usuario personalizado / genérico: detección inteligente por dominio de correo
-    let tenantDetectado = 'corr-lv-01';
-    if (emailInput.includes('banchile')) tenantDetectado = 'corr-bc-02';
-    else if (emailInput.includes('credicorp')) tenantDetectado = 'corr-cc-03';
-
-    tenantActivo = tenantDetectado;
-    const nombreGenerico = emailInput ? emailInput.split('@')[0] : 'Operador Bursátil';
-    const initials = nombreGenerico.substring(0, 2).toUpperCase();
-
-    sessionStorage.setItem('nuam_auth', 'true');
-    sessionStorage.setItem('nuam_user', nombreGenerico);
-    sessionStorage.setItem('nuam_user_email', emailInput || 'operador@corredora.cl');
-    sessionStorage.setItem('nuam_user_cargo', 'Operador de Mesa');
-    sessionStorage.setItem('nuam_user_rank', 'OPERADOR_SENIOR');
-    sessionStorage.setItem('nuam_user_initials', initials);
-    sessionStorage.setItem('nuam_tenant', tenantActivo);
+    await mostrarIntranet();
+    cambiarSeccion('calificaciones');
+    mostrarAlerta(`Bienvenido, ${usuario.nombre} (${usuario.rol})`, 'success');
+  } catch (err) {
+    mostrarAlerta('Error de autenticación: ' + err.message, 'error');
   }
-
-  await mostrarIntranet();
-  cambiarSeccion('calificaciones');
 }
 
-function cerrarSesion() {
+async function cerrarSesion() {
+  try {
+    const token = getAuthToken();
+    await fetch('/api/auth/logout', {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+    });
+  } catch (_) {}
   sessionStorage.clear();
+  tenantActivo = null;
+  corredoraActual = null;
+  calificacionesActuales = [];
+  usuariosActuales = [];
   mostrarLanding();
 }
 
@@ -176,6 +226,9 @@ async function mostrarIntranet() {
     intranet.style.flexDirection = 'column';
   }
 
+  // Cargar lista oficial de corredoras primero
+  await cargarCorredoras();
+
   const selectIntranet = document.getElementById('tenantSelect');
   if (selectIntranet && tenantActivo) {
     selectIntranet.value = tenantActivo;
@@ -189,62 +242,94 @@ async function mostrarIntranet() {
 }
 
 function actualizarBadgesTenant() {
-  corredoraActual = corredoras.find(c => c.id === tenantActivo);
-  if (corredoraActual) {
-    // Sincronizar el select de la barra superior siempre con el tenant activo
-    const selectIntranet = document.getElementById('tenantSelect');
-    if (selectIntranet && selectIntranet.value !== tenantActivo) {
-      selectIntranet.value = tenantActivo;
-    }
-
-    const initialsMap = {
-      'corr-lv-01': 'LV',
-      'corr-bc-02': 'BC',
-      'corr-cc-03': 'CC'
+  const r = getRangoActual();
+  if (tenantActivo === 'GLOBAL' && (r === 'ADMIN_NUAM' || r === 'SUPER_ADMIN' || r === 'OFICIAL_CUMPLIMIENTO')) {
+    corredoraActual = NOMBRES_CORREDORAS['GLOBAL'];
+  } else {
+    corredoraActual = corredoras.find(c => c.id === tenantActivo) || NOMBRES_CORREDORAS[tenantActivo] || {
+      id: tenantActivo,
+      nombre: tenantActivo || 'nuam exchange',
+      codigo: tenantActivo || 'NUAM',
+      initials: 'NM'
     };
-    const badgeInitials = document.getElementById('badgeTenantInitials');
-    if (badgeInitials) badgeInitials.textContent = initialsMap[tenantActivo] || 'NM';
-
-    const badge = document.getElementById('badgeTenantActivo');
-    if (badge) badge.textContent = corredoraActual.codigo;
-    const footTenant = document.getElementById('footerTenant');
-    if (footTenant) footTenant.textContent = corredoraActual.nombre;
-    const badgeHero = document.getElementById('badgeTenantHero');
-    if (badgeHero) badgeHero.textContent = corredoraActual.nombre;
-
-    // Actualizar perfil de operador dinámicamente en el navbar
-    const savedUser = sessionStorage.getItem('nuam_user') || 'César Contreras';
-    const savedCargo = sessionStorage.getItem('nuam_user_cargo') || 'Líder Técnico & Arquitectura';
-    const savedRank = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-    const savedInitial = sessionStorage.getItem('nuam_user_initials') || 'CC';
-
-    const avatar = document.getElementById('operadorAvatarInitials');
-    const nombreOp = document.getElementById('operadorNombre');
-    const cargoOp = document.getElementById('operadorCargo');
-    const badgeRango = document.getElementById('operadorRangoBadge');
-
-    if (avatar) avatar.textContent = savedInitial;
-    if (nombreOp) nombreOp.textContent = savedUser;
-    if (cargoOp) cargoOp.textContent = savedCargo;
-
-    if (badgeRango) {
-      const rankStyles = {
-        'SUPER_ADMIN': { label: 'ADMINISTRADOR', class: 'bg-amber-100 text-amber-800 border-amber-300' },
-        'ADMIN_CORREDORA': { label: 'OPERADOR', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-        'OPERADOR_SENIOR': { label: 'OPERADOR', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-        'AUDITOR_CMF': { label: 'AUDITOR', class: 'bg-purple-100 text-purple-800 border-purple-300' }
-      };
-      const info = rankStyles[savedRank] || { label: savedRank, class: 'bg-slate-100 text-slate-700 border-slate-200' };
-      badgeRango.textContent = info.label;
-      badgeRango.className = `text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${info.class}`;
-    }
-    aplicarRestriccionesPorRol();
   }
+
+  // Sincronizar el select de la barra superior siempre con el tenant activo
+  const selectIntranet = document.getElementById('tenantSelect');
+  if (selectIntranet && tenantActivo && selectIntranet.value !== tenantActivo) {
+    selectIntranet.value = tenantActivo;
+  }
+
+  const initialsMap = {
+    'corr-lv-01': 'LV',
+    'corr-bc-02': 'BC',
+    'corr-cc-03': 'CC',
+    'GLOBAL': 'NM'
+  };
+  const badgeInitials = document.getElementById('badgeTenantInitials');
+  if (badgeInitials) badgeInitials.textContent = initialsMap[tenantActivo] || corredoraActual.initials || 'NM';
+
+  const badge = document.getElementById('badgeTenantActivo');
+  if (badge) badge.textContent = corredoraActual.codigo || tenantActivo;
+  const footTenant = document.getElementById('footerTenant');
+  if (footTenant) footTenant.textContent = corredoraActual.nombre;
+  const badgeHero = document.getElementById('badgeTenantHero');
+  if (badgeHero) badgeHero.textContent = corredoraActual.nombre;
+
+  // Actualizar subtítulo según perfil de usuario
+  const subtituloVista = document.getElementById('badgeSubtituloVista');
+  if (subtituloVista) {
+    const r = getRangoActual();
+    if (r === 'ADMIN_NUAM' || r === 'SUPER_ADMIN') {
+      subtituloVista.textContent = 'Consola de Control Central';
+    } else if (r === 'OFICIAL_CUMPLIMIENTO') {
+      subtituloVista.textContent = 'Supervisión Normativa y Cumplimiento (Solo Lectura)';
+    } else if (r === 'REGULADOR_CMF' || r === 'AUDITOR_CMF') {
+      subtituloVista.textContent = 'Inspección Fiscalizadora CMF (Solo Lectura)';
+    } else {
+      subtituloVista.textContent = 'Mesa de Trabajo Operativa';
+    }
+  }
+
+  // Actualizar perfil de operador dinámicamente en el navbar (siempre)
+  const savedUser = sessionStorage.getItem('nuam_user') || 'Operador Institucional';
+  const savedCargo = sessionStorage.getItem('nuam_user_cargo') || 'nuam exchange';
+  const savedRank = sessionStorage.getItem('nuam_user_rank') || 'ADMIN_NUAM';
+  const savedInitial = sessionStorage.getItem('nuam_user_initials') || 'OP';
+
+  const avatar = document.getElementById('operadorAvatarInitials');
+  const nombreOp = document.getElementById('operadorNombre');
+  const cargoOp = document.getElementById('operadorCargo');
+  const badgeRango = document.getElementById('operadorRangoBadge');
+
+  if (avatar) avatar.textContent = savedInitial;
+  if (nombreOp) nombreOp.textContent = savedUser;
+  if (cargoOp) cargoOp.textContent = savedCargo;
+
+  if (badgeRango) {
+    const rankStyles = {
+      'ADMIN_NUAM': { label: 'ADMINISTRADOR', class: 'bg-amber-100 text-amber-800 border-amber-300' },
+      'SUPER_ADMIN': { label: 'ADMINISTRADOR', class: 'bg-amber-100 text-amber-800 border-amber-300' },
+      'OPERADOR_CORREDORA': { label: 'OPERADOR', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+      'ADMIN_CORREDORA': { label: 'OPERADOR', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+      'OPERADOR_SENIOR': { label: 'OPERADOR', class: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+      'OFICIAL_CUMPLIMIENTO': { label: 'OFICIAL CUMPLIMIENTO', class: 'bg-blue-100 text-blue-800 border-blue-300' },
+      'REGULADOR_CMF': { label: 'REGULADOR CMF', class: 'bg-purple-100 text-purple-800 border-purple-300' },
+      'AUDITOR_CMF': { label: 'REGULADOR CMF', class: 'bg-purple-100 text-purple-800 border-purple-300' }
+    };
+    const info = rankStyles[savedRank] || { label: savedRank, class: 'bg-slate-100 text-slate-700 border-slate-200' };
+    badgeRango.textContent = info.label;
+    badgeRango.className = `text-[8px] font-extrabold uppercase px-1.5 py-0.5 rounded border ${info.class}`;
+  }
+  aplicarRestriccionesPorRol();
 }
 
 // Aplicar Reglas y Restricciones Estrictas de Privilegios por Rol (RBAC)
 function aplicarRestriccionesPorRol() {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
+  const rango = sessionStorage.getItem('nuam_user_rank') || 'ADMIN_NUAM';
+  const esAdmin = (rango === 'ADMIN_NUAM' || rango === 'SUPER_ADMIN');
+  const esAuditor = (rango === 'REGULADOR_CMF' || rango === 'OFICIAL_CUMPLIMIENTO' || rango === 'AUDITOR_CMF');
+
   const banner = document.getElementById('bannerRestriccionRol');
   const txtBanner = document.getElementById('textoRestriccionRol');
   const badgeBanner = document.getElementById('badgeRestriccionRol');
@@ -271,7 +356,7 @@ function aplicarRestriccionesPorRol() {
   const cardRechazo = document.getElementById('cardAutoCargaRechazo');
 
   // Redirección de seguridad si un no-admin está en la sección de usuarios
-  if (rango !== 'SUPER_ADMIN') {
+  if (!esAdmin) {
     const secUsr = document.getElementById('seccionUsuarios');
     if (secUsr && !secUsr.classList.contains('hidden')) {
       cambiarSeccion('calificaciones');
@@ -280,7 +365,7 @@ function aplicarRestriccionesPorRol() {
 
   // 1. ÁREA DE PERFILES Y PERMISOS: Solo accesible y visible para el ADMINISTRADOR
   if (navUsr) {
-    if (rango === 'SUPER_ADMIN') {
+    if (esAdmin) {
       navUsr.classList.remove('hidden');
     } else {
       navUsr.classList.add('hidden');
@@ -288,14 +373,18 @@ function aplicarRestriccionesPorRol() {
   }
 
   // 2. VISTAS PERSONALIZADAS SEGÚN EL ROL
-  if (rango === 'AUDITOR_CMF') {
+  if (esAuditor) {
     // ==========================================
-    // VISTA DEL AUDITOR (Fiscalización y Consulta)
+    // VISTA DEL AUDITOR / REGULADOR (Fiscalización y Consulta)
     // ==========================================
     if (navCalTexto) navCalTexto.textContent = 'Inspección de Carteras';
     if (navCarga) navCarga.classList.add('hidden'); // El auditor no sube archivos
     if (navAuditoria) navAuditoria.classList.remove('hidden'); // Su herramienta clave
-    if (subtituloVista) subtituloVista.textContent = 'Inspección Regulatoria de Mercado (Solo Lectura)';
+    if (subtituloVista) {
+      subtituloVista.textContent = (rango === 'OFICIAL_CUMPLIMIENTO')
+        ? 'Supervisión Normativa y Cumplimiento (Solo Lectura)'
+        : 'Inspección Fiscalizadora CMF (Solo Lectura)';
+    }
 
     if (btnNuevoContenedor) btnNuevoContenedor.classList.add('hidden');
     if (btnNuevo) btnNuevo.classList.add('hidden');
@@ -304,23 +393,32 @@ function aplicarRestriccionesPorRol() {
     if (btnSemilla) btnSemilla.classList.add('hidden');
     if (btnCrearUsr) btnCrearUsr.classList.add('hidden');
 
-    // El Auditor puede auditar cualquier corredora
+    // El Auditor / Oficial puede auditar cualquier corredora
     if (tenantSelect) {
       tenantSelect.disabled = false;
       tenantSelect.classList.remove('opacity-60', 'cursor-not-allowed');
-      tenantSelect.title = 'Fiscalización CMF: Inspección libre entre corredoras';
+      tenantSelect.title = (rango === 'OFICIAL_CUMPLIMIENTO')
+        ? 'Supervisión de Cumplimiento: Inspección entre carteras'
+        : 'Fiscalización CMF: Inspección libre entre corredoras';
     }
 
     if (banner) {
-      banner.className = 'mx-6 mt-2 px-3 py-1.5 rounded-xl flex items-center justify-between text-xs bg-purple-50 text-purple-900 border border-purple-200';
-      txtBanner.textContent = 'Modo Fiscalización CMF: Consulta e inspección regulatoria en tiempo real.';
-      badgeBanner.textContent = 'AUDITOR';
-      badgeBanner.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-200 text-purple-900';
+      if (rango === 'OFICIAL_CUMPLIMIENTO') {
+        banner.className = 'mx-6 mt-2 px-3 py-1.5 rounded-xl flex items-center justify-between text-xs bg-blue-50 text-blue-900 border border-blue-200';
+        txtBanner.textContent = 'Modo Oficial de Cumplimiento: Supervisión normativa y auditoría interna institucional nuam.';
+        badgeBanner.textContent = 'CUMPLIMIENTO';
+        badgeBanner.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-blue-200 text-blue-900';
+      } else {
+        banner.className = 'mx-6 mt-2 px-3 py-1.5 rounded-xl flex items-center justify-between text-xs bg-purple-50 text-purple-900 border border-purple-200';
+        txtBanner.textContent = 'Modo Fiscalizador CMF: Consulta e inspección regulatoria externa en tiempo real.';
+        badgeBanner.textContent = 'REGULADOR CMF';
+        badgeBanner.className = 'text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-purple-200 text-purple-900';
+      }
       if (iconoBanner) iconoBanner.setAttribute('data-lucide', 'shield-check');
       banner.classList.remove('hidden');
     }
 
-  } else if (rango === 'OPERADOR_SENIOR' || rango === 'ADMIN_CORREDORA') {
+  } else if (!esAdmin) {
     // ==========================================
     // VISTA DEL OPERADOR (Mesa de Trabajo Operativa)
     // ==========================================
@@ -376,7 +474,7 @@ function aplicarRestriccionesPorRol() {
       btnVaciar.classList.remove('hidden');
       btnVaciar.disabled = false;
       btnVaciar.classList.remove('opacity-40', 'cursor-not-allowed');
-      btnVaciar.title = 'Vaciar cartera para demostrar ingesta limpia desde cero';
+      btnVaciar.title = 'Elimina las declaraciones registradas de la corredora activa';
     }
     if (btnSemilla) {
       btnSemilla.classList.remove('hidden');
@@ -406,7 +504,7 @@ function aplicarRestriccionesPorRol() {
 async function cargarCalificaciones() {
   if (!tenantActivo) return;
   try {
-    const res = await fetch(`/api/calificaciones?tenant_id=${tenantActivo}`);
+    const res = await authFetch(`/api/declaraciones?tenant=${tenantActivo}`);
     const json = await res.json();
     if (json.success) {
       calificacionesActuales = json.data;
@@ -414,7 +512,7 @@ async function cargarCalificaciones() {
       actualizarMetricas();
     }
   } catch (err) {
-    mostrarAlerta('Error cargando calificaciones: ' + err.message, 'error');
+    mostrarAlerta('Error cargando declaraciones: ' + err.message, 'error');
   }
 }
 
@@ -520,8 +618,8 @@ function renderizarTabla(lista) {
         </span>
       </td>
       <td class="py-2.5 px-2 text-right space-x-1 whitespace-nowrap">
-        ${(sessionStorage.getItem('nuam_user_rank') || '') === 'AUDITOR_CMF' 
-          ? `<span class="text-[10px] text-purple-700 bg-purple-50 border border-purple-200 font-semibold px-2 py-0.5 rounded-full inline-flex items-center space-x-1" title="Auditor CMF: Modo Solo Lectura">
+        ${esUsuarioAuditor()
+          ? `<span class="text-[10px] text-purple-700 bg-purple-50 border border-purple-200 font-semibold px-2 py-0.5 rounded-full inline-flex items-center space-x-1" title="Fiscalización: Modo Solo Lectura">
                <i data-lucide="shield" class="w-3 h-3 text-purple-600"></i>
                <span>Solo Lectura</span>
              </span>`
@@ -578,18 +676,20 @@ function actualizarMetricas() {
 
 // Cambiar Sección en Navbar Horizontal
 function cambiarSeccion(seccion) {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
+  const rango = getRangoActual();
+  const esAdmin = esUsuarioAdmin();
+  const esAuditor = esUsuarioAuditor();
 
   // Guard de acceso por rol: Usuarios y Permisos es exclusivo del Administrador
-  if (rango !== 'SUPER_ADMIN' && seccion === 'usuarios') {
+  if (!esAdmin && seccion === 'usuarios') {
     mostrarAlerta('Acceso Denegado: El área de perfiles y permisos es exclusiva del Administrador.', 'error');
-    seccion = (rango === 'AUDITOR_CMF' ? 'auditoria' : 'calificaciones');
+    seccion = esAuditor ? 'auditoria' : 'calificaciones';
   }
-  if (rango === 'AUDITOR_CMF' && seccion === 'cargamasiva') {
+  if (esAuditor && seccion === 'cargamasiva') {
     mostrarAlerta('Acceso Denegado: El perfil Auditor opera en modo de solo fiscalización y no puede acceder a Carga Masiva.', 'error');
     seccion = 'calificaciones';
   }
-  if (rango !== 'SUPER_ADMIN' && rango !== 'AUDITOR_CMF' && seccion === 'auditoria') {
+  if (!esAdmin && !esAuditor && seccion === 'auditoria') {
     mostrarAlerta('Acceso Denegado: La bitácora de auditoría es para fiscalizadores y administradores.', 'error');
     seccion = 'calificaciones';
   }
@@ -662,37 +762,10 @@ function calcularSumaFactores() {
   return suma;
 }
 
-// Rellenar factores válidos con 1 clic para demostración rápida (Suma = 0.85)
-function demoLlenarFactoresValidos() {
-  const campos = ['f08', 'f09', 'f10', 'f11', 'f12', 'f13', 'f14', 'f15', 'f16', 'f17', 'f18', 'f19'];
-  campos.forEach(c => document.getElementById(c).value = '0');
-  document.getElementById('f08').value = '0.45';
-  document.getElementById('f09').value = '0.15';
-  document.getElementById('f10').value = '0.05';
-  document.getElementById('f13').value = '0.15';
-  document.getElementById('f19').value = '0.05';
-  if (!document.getElementById('formRut').value) document.getElementById('formRut').value = '76.123.456-7';
-  if (!document.getElementById('formNemotecnico').value) document.getElementById('formNemotecnico').value = 'CHILE';
-  if (!document.getElementById('formRazon').value) document.getElementById('formRazon').value = 'Inversiones Los Andes SpA';
-  calcularSumaFactores();
-}
-
-// Rellenar factores inválidos con 1 clic para demostración rápida (Suma = 1.15 > 1.0)
-function demoLlenarFactoresInvalidos() {
-  const campos = ['f08', 'f09', 'f10', 'f11', 'f12', 'f13', 'f14', 'f15', 'f16', 'f17', 'f18', 'f19'];
-  campos.forEach(c => document.getElementById(c).value = '0');
-  document.getElementById('f08').value = '0.70';
-  document.getElementById('f09').value = '0.45';
-  if (!document.getElementById('formRut').value) document.getElementById('formRut').value = '76.123.456-7';
-  if (!document.getElementById('formNemotecnico').value) document.getElementById('formNemotecnico').value = 'CHILE';
-  calcularSumaFactores();
-}
-
 // Modal Nuevo / Editar
 function abrirModalNuevo() {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'AUDITOR_CMF') {
-    mostrarAlerta('Acceso Denegado: El perfil Auditor CMF opera en modo de solo fiscalización (lectura).', 'error');
+  if (esUsuarioAuditor()) {
+    mostrarAlerta('Acceso Denegado: Los perfiles de fiscalización operan en modo de solo lectura.', 'error');
     return;
   }
 
@@ -706,9 +779,8 @@ function abrirModalNuevo() {
 }
 
 function editarCalificacion(id) {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'AUDITOR_CMF') {
-    mostrarAlerta('Acceso Denegado: El perfil Auditor CMF opera en modo de solo fiscalización (lectura).', 'error');
+  if (esUsuarioAuditor()) {
+    mostrarAlerta('Acceso Denegado: Los perfiles de fiscalización operan en modo de solo lectura.', 'error');
     return;
   }
 
@@ -742,9 +814,8 @@ function cerrarModal() {
 // Guardar Calificación
 async function guardarCalificacion(e) {
   e.preventDefault();
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'AUDITOR_CMF') {
-    mostrarAlerta('Acceso Denegado: El perfil Auditor CMF opera en modo de solo fiscalización (lectura).', 'error');
+  if (esUsuarioAuditor()) {
+    mostrarAlerta('Acceso Denegado: Los perfiles de fiscalización operan en modo de solo lectura.', 'error');
     return;
   }
 
@@ -779,13 +850,13 @@ async function guardarCalificacion(e) {
   try {
     let res;
     if (id) {
-      res = await fetch(`/api/calificaciones/${id}`, {
+      res = await authFetch(`/api/declaraciones/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
     } else {
-      res = await fetch('/api/calificaciones', {
+      res = await authFetch('/api/declaraciones', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -799,7 +870,7 @@ async function guardarCalificacion(e) {
       await cargarCalificaciones();
       await cargarAuditoria();
     } else {
-      mostrarAlerta(json.error || 'Error al guardar.', 'error');
+      mostrarAlerta((json.error && json.error.message) || json.error || 'Error al guardar.', 'error');
     }
   } catch (err) {
     mostrarAlerta('Error de red: ' + err.message, 'error');
@@ -808,92 +879,110 @@ async function guardarCalificacion(e) {
 
 // Eliminar Calificación
 async function eliminarCalificacion(id) {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'AUDITOR_CMF') {
-    mostrarAlerta('Acceso Denegado: El perfil Auditor CMF opera en modo de solo fiscalización (lectura).', 'error');
+  if (esUsuarioAuditor()) {
+    mostrarAlerta('Acceso Denegado: Los perfiles de fiscalización operan en modo de solo lectura.', 'error');
     return;
   }
 
-  if (!confirm('¿Confirma eliminar esta calificación tributaria? La acción quedará registrada en la bitácora inmutable.')) {
+  if (!confirm('¿Confirma eliminar esta calificación tributaria? La acción quedará registrada en la bitácora oficial.')) {
     return;
   }
 
-  const usuario = sessionStorage.getItem('nuam_user_email') || 'operador@nuam.cl';
   try {
-    const res = await fetch(`/api/calificaciones/${id}?tenant_id=${tenantActivo}&usuario=${encodeURIComponent(usuario)}`, { method: 'DELETE' });
+    const url = tenantActivo ? `/api/declaraciones/${id}?tenant=${tenantActivo}` : `/api/declaraciones/${id}`;
+    const res = await authFetch(url, { method: 'DELETE' });
     const json = await res.json();
     if (json.success) {
       mostrarAlerta('Calificación eliminada correctamente.', 'success');
       await cargarCalificaciones();
       await cargarAuditoria();
     } else {
-      mostrarAlerta(json.error || 'No se pudo eliminar.', 'error');
+      mostrarAlerta((json.error && json.error.message) || json.error || 'No se pudo eliminar.', 'error');
     }
   } catch (err) {
-    mostrarAlerta('Error eliminando: ' + err.message, 'error');
+    mostrarAlerta('Error: ' + err.message, 'error');
   }
 }
 
-// Vaciar Cartera para Demostración de Carga Limpia
+// Depuración de cartera de la corredora activa
 async function vaciarCartera() {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'AUDITOR_CMF' || rango === 'OPERADOR_SENIOR') {
-    mostrarAlerta(`Acceso Denegado: Su rango actual (${rango}) no tiene autorización para vaciar la cartera. Acción reservada para Jefe de Mesa o Super Admin.`, 'error');
+  if (!esUsuarioAdmin()) {
+    mostrarAlerta('Acceso Denegado: Su rango actual no tiene autorización para vaciar la cartera. Acción reservada para Administradores nuam.', 'error');
     return;
   }
 
-  const nombreCorredora = tenantActivo ? tenantActivo.replace('_', ' ') : 'la corredora';
-  if (!confirm(`¿Confirma vaciar todas las calificaciones tributarias de ${nombreCorredora}? Esta acción dejará la cartera en 0 para demostrar la ingesta masiva desde una planilla limpia.`)) {
+  const nombreCorredora = (corredoraActual && corredoraActual.nombre) || (tenantActivo ? tenantActivo.replace('_', ' ') : 'la corredora');
+  if (!confirm(`¿Confirma eliminar todas las calificaciones tributarias registradas de ${nombreCorredora}? La operación queda registrada en el Registro Oficial de Auditoría y no puede deshacerse.`)) {
     return;
   }
 
   try {
-    const res = await fetch('/api/calificaciones/vaciar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        tenant_id: tenantActivo,
-        usuario: sessionStorage.getItem('nuam_user') || 'operador@nuam.cl'
-      })
-    });
-    const json = await res.json();
-    if (json.success) {
-      mostrarAlerta(json.mensaje, 'info');
-      await cargarCalificaciones();
-      await cargarAuditoria();
-    } else {
-      mostrarAlerta(json.error || 'No se pudo vaciar la cartera.', 'error');
+    if (calificacionesActuales.length === 0) {
+      mostrarAlerta('No hay calificaciones registradas para vaciar en esta cartera.', 'info');
+      return;
     }
+    const elims = calificacionesActuales.map(c => {
+      const url = tenantActivo ? `/api/declaraciones/${c.id}?tenant=${tenantActivo}` : `/api/declaraciones/${c.id}`;
+      return authFetch(url, { method: 'DELETE' });
+    });
+    await Promise.all(elims);
+    mostrarAlerta(`Cartera de ${nombreCorredora} vaciada correctamente.`, 'info');
+    await cargarCalificaciones();
+    await cargarAuditoria();
   } catch (err) {
-    mostrarAlerta('Error de red al vaciar: ' + err.message, 'error');
+    mostrarAlerta('Error al vaciar cartera: ' + err.message, 'error');
   }
 }
 
 // Restablecer Posiciones Semilla Oficiales
 async function restablecerSemilla() {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'AUDITOR_CMF' || rango === 'OPERADOR_SENIOR') {
-    mostrarAlerta(`Acceso Denegado: Su rango actual (${rango}) no tiene autorización para restablecer carteras.`, 'error');
+  if (!esUsuarioAdmin()) {
+    mostrarAlerta('Acceso Denegado: Su rango actual no tiene autorización para restablecer carteras. Acción reservada para Administradores nuam.', 'error');
     return;
   }
 
-  try {
-    const usuario = sessionStorage.getItem('nuam_user_email') || 'operador@nuam.cl';
-    const res = await fetch('/api/calificaciones/restablecer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant_id: tenantActivo, usuario })
-    });
-    const json = await res.json();
-    if (json.success) {
-      mostrarAlerta(json.mensaje, 'success');
-      await cargarCalificaciones();
-      await cargarAuditoria();
-    } else {
-      mostrarAlerta(json.error || 'No se pudieron restablecer las posiciones.', 'error');
+  if (!confirm('¿Confirma cargar las posiciones tributarias canónicas de referencia en esta corredora?')) {
+    return;
+  }
+
+  const semillas = [
+    {
+      tenant_id: tenantActivo || 'corr-lv-01',
+      rut_cliente: '96.555.120-4',
+      razon_social: 'Inversiones Santa Blanca S.A.',
+      nemotecnico: 'CHILE',
+      periodo_fiscal: 2026,
+      modalidad: 'FACTOR',
+      valor_nominal: 450000000,
+      no_inscrito: 0,
+      factores: { f08: 0.45, f09: 0.15, f10: 0.05, f11: 0, f12: 0, f13: 0.15, f14: 0, f15: 0, f16: 0, f17: 0, f18: 0, f19: 0.05 }
+    },
+    {
+      tenant_id: tenantActivo || 'corr-lv-01',
+      rut_cliente: '77.102.340-1',
+      razon_social: 'Rentas y Valores El Golf SpA',
+      nemotecnico: 'SQM-B',
+      periodo_fiscal: 2026,
+      modalidad: 'MONTO',
+      valor_nominal: 1200000000,
+      no_inscrito: 0,
+      factores: { f08: 0.5, f09: 0.1, f10: 0.1, f11: 0.05, f12: 0, f13: 0.1, f14: 0, f15: 0, f16: 0, f17: 0, f18: 0, f19: 0.05 }
     }
+  ];
+
+  try {
+    for (const semilla of semillas) {
+      await authFetch('/api/declaraciones', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(semilla)
+      });
+    }
+    mostrarAlerta('Posiciones institucionales de referencia restablecidas con éxito.', 'success');
+    await cargarCalificaciones();
+    await cargarAuditoria();
   } catch (err) {
-    mostrarAlerta('Error de red al restablecer: ' + err.message, 'error');
+    mostrarAlerta('Error restableciendo posiciones: ' + err.message, 'error');
   }
 }
 
@@ -920,11 +1009,11 @@ async function subirArchivoRapido() {
   const lbl = document.getElementById('nombreArchivoRapido');
 
   try {
-    const res = await fetch('/api/carga-masiva', { method: 'POST', body: formData });
+    const res = await authFetch('/api/declaraciones/carga-masiva', { method: 'POST', body: formData });
     const json = await res.json();
 
     if (json.success) {
-      const r = json.resultado;
+      const r = json.data || json.resultado;
       batchIdRechazosActivo = r.batchId;
 
       const boxRechazos = document.getElementById('boxDescargaRechazos');
@@ -940,7 +1029,7 @@ async function subirArchivoRapido() {
       await cargarCalificaciones();
       await cargarAuditoria();
     } else {
-      mostrarAlerta(json.error || 'Error procesando lote.', 'error');
+      mostrarAlerta((json.error && json.error.message) || json.error || 'Error procesando lote.', 'error');
     }
   } catch (err) {
     mostrarAlerta('Error en ingesta: ' + err.message, 'error');
@@ -955,149 +1044,26 @@ function descargarCsvRechazos() {
     mostrarAlerta('No hay un lote con rechazos activo para descargar.', 'info');
     return;
   }
-  window.location.href = `/api/descargar-rechazos/${batchIdRechazosActivo}`;
+  const token = getAuthToken();
+  window.location.href = `/api/declaraciones/carga-masiva/rechazos/${batchIdRechazosActivo}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 }
 
 function descargarPlantilla() {
-  window.location.href = '/api/plantilla-ejemplo?formato=xlsx';
+  const token = getAuthToken();
+  window.location.href = `/api/declaraciones/plantilla${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 }
 
 function descargarPlantillaExcel() {
-  window.location.href = '/api/plantilla-ejemplo?formato=xlsx';
+  const token = getAuthToken();
+  window.location.href = `/api/declaraciones/plantilla${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 }
 
-function descargarPlantillaCsv() {
-  window.location.href = '/api/plantilla-ejemplo?formato=csv';
-}
+let archivoEnMemoria = null;
 
-let archivoDemoEnMemoria = null;
-
-async function descargarLoteDemo(tipo) {
-  try {
-    mostrarAlerta(`Preparando lote de prueba (${tipo === 'valido' ? 'Válido' : 'Con Rechazo'})...`, 'info');
-
-    const url = `/api/lote-prueba/${tipo}?formato=xlsx`;
-    const resp = await fetch(url);
-    if (!resp.ok) throw new Error('Error al obtener el archivo del servidor');
-    const blob = await resp.blob();
-    const filename = tipo === 'valido' ? 'lote_prueba_valido.xlsx' : 'lote_prueba_con_rechazo.xlsx';
-
-    // Crear File en memoria
-    const file = new File([blob], filename, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    archivoDemoEnMemoria = file;
-
-    // Sincronizar input file si es posible
-    const input = document.getElementById('archivoMasivoFull');
-    try {
-      const dt = new DataTransfer();
-      dt.items.add(file);
-      if (input) input.files = dt.files;
-    } catch(e) {
-      console.log('DataTransfer no disponible, usando archivoDemoEnMemoria');
-    }
-
-    // Actualizar vista del Dropzone
-    const nombreSpan = document.getElementById('nombreArchivoFull');
-    const tituloDrop = document.getElementById('tituloDropzoneFull');
-    const btnProcesar = document.getElementById('btnProcesarFull');
-    const btnCancelar = document.getElementById('btnCancelarFull');
-    const estadoTxt = document.getElementById('estadoCargaFull');
-
-    if (nombreSpan) {
-      nombreSpan.textContent = tipo === 'valido'
-        ? `Lote Demo Cargado: ${filename} (4 registros válidos)`
-        : `Lote Demo Cargado: ${filename} (Incluye fila con factor 1.15 para rechazo automático)`;
-    }
-    if (tituloDrop) tituloDrop.textContent = filename;
-    if (btnProcesar) btnProcesar.disabled = false;
-    if (btnCancelar) btnCancelar.classList.remove('hidden');
-    if (estadoTxt) estadoTxt.textContent = `Lote inyectado en memoria. Procesando ingesta masiva automáticamente con lógica Upsert...`;
-
-    // Disparar descarga al equipo del operador
-    const downloadUrl = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(downloadUrl);
-
-    // Ejecutar procesamiento con 1 clic
-    setTimeout(() => {
-      subirArchivoFull();
-    }, 350);
-
-  } catch (err) {
-    console.error('Error cargando lote demo:', err);
-    window.location.href = `/api/lote-prueba/${tipo}?formato=xlsx`;
-  }
-}
-
-// Carga Inmediata y Ejecución de Archivo de Mercado Real
-async function cargarArchivoMercadoReal(nombreArchivo) {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'AUDITOR_CMF') {
-    mostrarAlerta('Acceso Denegado: El perfil Auditor CMF opera en modo de solo fiscalización y no puede ejecutar ingestas.', 'error');
-    return;
-  }
-
-  try {
-    // Aislamiento Multitenant: roles fijos no pueden cruzar a otra corredora mediante un archivo
-    const esRolFijo = rango === 'OPERADOR_SENIOR' || rango === 'ADMIN_CORREDORA';
-    if (esRolFijo) {
-      const tenantDelArchivo =
-        nombreArchivo.includes('larrainvial') ? 'corr-lv-01' :
-        nombreArchivo.includes('banchile')    ? 'corr-bc-02' :
-        nombreArchivo.includes('credicorp')   ? 'corr-cc-03' : null;
-      if (tenantDelArchivo && tenantDelArchivo !== tenantActivo) {
-        mostrarAlerta('Aislamiento Multitenant: Este archivo pertenece a otra corredora. Su cuenta está restringida a su corredora asignada.', 'error');
-        return;
-      }
-    }
-
-    // Para roles globales (SUPER_ADMIN, AUDITOR_CMF ya bloqueado arriba): auto-cambiar tenant al del archivo
-    if (!esRolFijo) {
-      if (nombreArchivo.includes('larrainvial') && tenantActivo !== 'corr-lv-01') {
-        await cambiarTenant('corr-lv-01');
-      } else if (nombreArchivo.includes('banchile') && tenantActivo !== 'corr-bc-02') {
-        await cambiarTenant('corr-bc-02');
-      } else if (nombreArchivo.includes('credicorp') && tenantActivo !== 'corr-cc-03') {
-        await cambiarTenant('corr-cc-03');
-      }
-    }
-
-    mostrarAlerta(`Cargando archivo bursátil: ${nombreArchivo}...`, 'info');
-    const resp = await fetch(`/archivos_mercado_real/${nombreArchivo}?t=${Date.now()}`);
-    if (!resp.ok) throw new Error(`No se pudo obtener el archivo del servidor (${resp.status})`);
-    const blob = await resp.blob();
-
-    const file = new File([blob], nombreArchivo, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    archivoDemoEnMemoria = file;
-
-    const nombreSpan = document.getElementById('nombreArchivoFull');
-    const tituloDrop = document.getElementById('tituloDropzoneFull');
-    const btnProcesar = document.getElementById('btnProcesarFull');
-    const btnCancelar = document.getElementById('btnCancelarFull');
-    const estadoTxt = document.getElementById('estadoCargaFull');
-
-    if (nombreSpan) nombreSpan.textContent = `Archivo de Mercado Real: ${nombreArchivo} (${(file.size / 1024).toFixed(1)} KB)`;
-    if (tituloDrop) tituloDrop.textContent = nombreArchivo;
-    if (btnProcesar) btnProcesar.disabled = false;
-    if (btnCancelar) btnCancelar.classList.remove('hidden');
-    if (estadoTxt) estadoTxt.textContent = `Inyectado en memoria. Procesando ingesta masiva Upsert...`;
-
-    // Procesar directamente pasando el objeto File (evita bloqueos o carreras)
-    await subirArchivoFull(file);
-
-  } catch (err) {
-    mostrarAlerta('Error cargando archivo de mercado: ' + err.message, 'error');
-  }
-}
-
-function exportarDeclaracion(formato = 'csv') {
+function exportarDeclaracion(formato = 'xlsx') {
   if (!tenantActivo) return;
-  window.location.href = `/api/exportar-declaracion?tenant_id=${tenantActivo}&formato=${formato}`;
+  const token = getAuthToken();
+  window.location.href = `/api/declaraciones/exportar?tenant=${tenantActivo}&formato=${formato}${token ? `&token=${encodeURIComponent(token)}` : ''}`;
 }
 
 function exportarDeclaracionExcel() {
@@ -1108,7 +1074,7 @@ function exportarDeclaracionExcel() {
 function archivoFullSeleccionado(input) {
   if (!input.files || !input.files[0]) return;
   const file = input.files[0];
-  archivoDemoEnMemoria = file;
+  archivoEnMemoria = file;
   const sizeKb = (file.size / 1024).toFixed(1);
 
   const nombreSpan = document.getElementById('nombreArchivoFull');
@@ -1121,11 +1087,11 @@ function archivoFullSeleccionado(input) {
   if (tituloDrop) tituloDrop.textContent = file.name;
   if (btnProcesar) btnProcesar.disabled = false;
   if (btnCancelar) btnCancelar.classList.remove('hidden');
-  if (estadoTxt) estadoTxt.textContent = `Listo para procesar con lógica Upsert (actualiza existentes e inserta nuevos)`;
+  if (estadoTxt) estadoTxt.textContent = `Listo para procesar: actualiza las posiciones existentes e incorpora las nuevas`;
 }
 
 function cancelarArchivoFull() {
-  archivoDemoEnMemoria = null;
+  archivoEnMemoria = null;
   const input = document.getElementById('archivoMasivoFull');
   if (input) input.value = '';
 
@@ -1143,21 +1109,20 @@ function cancelarArchivoFull() {
 }
 
 async function subirArchivoFull(archivoDirecto = null) {
-  const rango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (rango === 'AUDITOR_CMF') {
-    mostrarAlerta('Acceso Denegado: El perfil Auditor CMF opera en modo de solo fiscalización y no puede ejecutar ingestas.', 'error');
+  if (esUsuarioAuditor()) {
+    mostrarAlerta('Acceso Denegado: Los perfiles de fiscalización operan en modo de solo lectura y no pueden ejecutar ingestas.', 'error');
     return;
   }
 
   const input = document.getElementById('archivoMasivoFull');
-  const file = archivoDirecto || (input && input.files && input.files[0]) || archivoDemoEnMemoria;
+  const file = archivoDirecto || (input && input.files && input.files[0]) || archivoEnMemoria;
 
   if (!file) {
     mostrarAlerta('Por favor seleccione un archivo primero o elija un lote para auto-cargar.', 'error');
     return;
   }
 
-  const esRolFijo = rango === 'OPERADOR_SENIOR' || rango === 'ADMIN_CORREDORA';
+  const esRolFijo = esUsuarioOperador();
   if (esRolFijo && file && file.name) {
     const fn = file.name.toLowerCase();
     const tenantArchivo =
@@ -1182,14 +1147,14 @@ async function subirArchivoFull(archivoDirecto = null) {
     btnProcesar.disabled = true;
     btnProcesar.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span> <span>Procesando lote...</span>`;
   }
-  if (estadoTxt) estadoTxt.textContent = 'Validando regla fiscal fila por fila y ejecutando Upsert...';
+  if (estadoTxt) estadoTxt.textContent = 'Validando regla fiscal fila por fila y procesando el lote...';
 
   try {
-    const res = await fetch('/api/carga-masiva', { method: 'POST', body: formData });
+    const res = await authFetch('/api/declaraciones/carga-masiva', { method: 'POST', body: formData });
     const json = await res.json();
 
     if (json.success) {
-      const r = json.resultado;
+      const r = json.data || json.resultado;
       batchIdRechazosActivo = r.batchId;
 
       // Actualizar panel de resultados
@@ -1261,49 +1226,81 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+function formatearDetalleAuditoria(ev) {
+  if (!ev) return '-';
+  const d = ev.detalle;
+  if (d && d !== 'null' && d !== 'undefined' && d !== '{}') {
+    if (typeof d === 'object') {
+      const entries = Object.entries(d);
+      if (entries.length > 0) {
+        return entries.map(([k, v]) => `${k}: ${v}`).join(' | ');
+      }
+    } else if (typeof d === 'string') {
+      const trimmed = d.trim();
+      if (trimmed && trimmed !== 'null' && trimmed !== 'undefined' && trimmed !== '{}') {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === 'object') {
+            const entries = Object.entries(parsed);
+            if (entries.length > 0) {
+              return entries.map(([k, v]) => `${k}: ${v}`).join(' | ');
+            }
+          } else if (parsed && parsed !== 'null' && parsed !== 'undefined') {
+            return String(parsed);
+          }
+        } catch {
+          return trimmed;
+        }
+      }
+    }
+  }
+
+  const accionesMap = {
+    'LOGIN': 'Inicio de sesión exitoso en terminal B2B',
+    'LOGOUT': 'Cierre de sesión voluntario',
+    'EXPORTAR': 'Exportación consolidada de cartera',
+    'CARGA_MASIVA': 'Carga masiva procesada exitosamente',
+    'CARGA_MASIVA_INSERTAR': 'Inserción masiva de declaración',
+    'CARGA_MASIVA_ACTUALIZAR': 'Actualización masiva de declaración',
+    'DECLARACION_CREAR': 'Registro de nueva calificación tributaria',
+    'DECLARACION_ACTUALIZAR': 'Actualización de calificación tributaria',
+    'DECLARACION_ELIMINAR': 'Eliminación de calificación tributaria',
+    'USUARIO_CREAR': 'Creación de cuenta institucional',
+    'USUARIO_ACTUALIZAR': 'Actualización de cuenta institucional',
+    'USUARIO_ELIMINAR': 'Revocación de cuenta institucional',
+    'INSTRUMENTO_CREAR': 'Registro de instrumento bursátil',
+    'INSTRUMENTO_ACTUALIZAR': 'Actualización de instrumento bursátil',
+    'INSTRUMENTO_ELIMINAR': 'Baja de instrumento bursátil',
+    'SEMILLA_RESTABLECER': 'Restablecimiento de posiciones canónicas',
+    'CARTERA_VACIAR': 'Vaciado de cartera'
+  };
+
+  return accionesMap[ev.accion] || (ev.entidad ? `Operación sobre ${ev.entidad}` : '-');
+}
+
 // Cargar Auditoría (Feed Oscuro y Tabla Completa)
 async function cargarAuditoria() {
   try {
-    const res = await fetch(`/api/auditoria?tenant_id=${tenantActivo}`);
+    const res = await authFetch(`/api/auditoria?tenant=${tenantActivo}`);
     const json = await res.json();
     if (json.success) {
-      // 1. Mini Feed en Tarjeta Oscura
-      const feed = document.getElementById('miniFeedAuditoria');
-      if (feed) {
-        feed.innerHTML = '';
-        const ultimos = json.data.slice(0, 3);
-        if (ultimos.length === 0) {
-          feed.innerHTML = '<span class="text-slate-500">Sin eventos de auditoría para este corredor.</span>';
-        } else {
-          ultimos.forEach(ev => {
-            const hora = new Date(ev.timestamp).toLocaleTimeString('es-CL');
-            const d = document.createElement('div');
-            d.className = 'p-2 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between';
-            d.innerHTML = `
-              <div class="flex items-center space-x-2 truncate">
-                <span class="text-[10px] text-emerald-400 font-bold px-1.5 py-0.5 rounded bg-emerald-500/10">${ev.accion}</span>
-                <span class="text-slate-300 text-xs">${ev.detalle?.rut || ev.detalle?.rut_cliente || 'CALIFICACION'}</span>
-              </div>
-              <span class="text-[10px] text-slate-500">${hora}</span>
-            `;
-            feed.appendChild(d);
-          });
-        }
-      }
-
-      // 2. Tabla Completa en Sección de Auditoría
+      // Tabla completa del Registro Oficial de Auditoría
       const tbody = document.getElementById('tablaAuditoriaFull');
       if (tbody) {
         tbody.innerHTML = '';
-        json.data.forEach(ev => {
+        const eventos = json.data || [];
+        eventos.forEach(ev => {
           const tr = document.createElement('tr');
-          const fecha = new Date(ev.timestamp).toLocaleString('es-CL');
+          const fecha = new Date(ev.created_at || ev.timestamp).toLocaleString('es-CL');
+          const usuarioNom = ev.usuario_email || ev.usuario || 'operador';
+          const detalleTxt = formatearDetalleAuditoria(ev);
+
           tr.innerHTML = `
             <td class="py-2.5 px-3 text-slate-500">${fecha}</td>
-            <td class="py-2.5 px-3 font-semibold text-brand-black">${ev.usuario || 'operador'}</td>
+            <td class="py-2.5 px-3 font-semibold text-brand-black">${usuarioNom}</td>
             <td class="py-2.5 px-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">${ev.accion}</span></td>
             <td class="py-2.5 px-3 text-slate-600">${ev.entidad}</td>
-            <td class="py-2.5 px-3 text-slate-500 truncate max-w-sm">${JSON.stringify(ev.detalle)}</td>
+            <td class="py-2.5 px-3 text-slate-500 truncate max-w-sm" title="${detalleTxt}">${detalleTxt}</td>
           `;
           tbody.appendChild(tr);
         });
@@ -1317,13 +1314,14 @@ async function cargarAuditoria() {
 // Cargar Bolsa Central nuam (Catálogo)
 async function cargarBolsaCentral() {
   try {
-    const res = await fetch('/api/bolsa-central');
+    const res = await authFetch('/api/instrumentos');
     const json = await res.json();
     if (json.success) {
       const grid = document.getElementById('gridInstrumentosFull');
       if (grid) {
         grid.innerHTML = '';
-        json.instrumentos.forEach(i => {
+        const instrumentos = json.data || json.instrumentos || [];
+        instrumentos.forEach(i => {
           const div = document.createElement('div');
           div.className = 'p-3 bg-slate-50 rounded-2xl border border-slate-200 flex items-center justify-between text-xs';
           div.innerHTML = `
@@ -1331,7 +1329,7 @@ async function cargarBolsaCentral() {
               <span class="font-bold text-brand-black block font-mono">${i.nemotecnico}</span>
               <span class="text-[11px] text-slate-500">${i.razon_social}</span>
             </div>
-            <span class="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">READ ONLY</span>
+            <span class="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">${i.mercado || 'OFICIAL'}</span>
           `;
           grid.appendChild(div);
         });
@@ -1339,50 +1337,6 @@ async function cargarBolsaCentral() {
     }
   } catch (err) {
     console.error('Error cargando bolsa central:', err);
-  }
-}
-
-// Verificación de Políticas de Acceso en Gateway Central (Enlace Seguro)
-async function probarEscrituraBolsaCentral() {
-  const boxes = [
-    document.getElementById('resultadoTestNoImpacto'),
-    document.getElementById('resultadoTestNoImpactoBolsa')
-  ].filter(Boolean);
-
-  boxes.forEach(box => {
-    box.className = 'p-3 rounded-2xl text-xs bg-slate-900 border border-slate-700 text-slate-300';
-    box.innerHTML = 'Verificando políticas de acceso en gateway transaccional...';
-    box.classList.remove('hidden');
-  });
-
-  try {
-    const res = await fetch('/api/bolsa-central/test-write', { method: 'POST' });
-    const json = await res.json();
-
-    if (res.status === 403) {
-      boxes.forEach(box => {
-        box.className = 'p-4 rounded-2xl text-xs bg-emerald-500/10 border border-emerald-500/30 text-emerald-200';
-        box.innerHTML = `
-          <div class="flex items-start space-x-2.5">
-            <i data-lucide="shield-check" class="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5"></i>
-            <div>
-              <span class="font-extrabold block text-xs text-emerald-300">ENLACE SEGURO CONFIRMADO: HTTP 403 FORBIDDEN</span>
-              <p class="mt-1 text-xs text-slate-200 leading-relaxed">${json.mensaje}</p>
-              <div class="mt-2 text-[10px] text-slate-300 font-mono flex flex-wrap gap-2">
-                <span class="bg-black/40 px-2 py-0.5 rounded border border-white/10">Módulo: ${json.modulo}</span>
-                <span class="bg-black/40 px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-300">Permisos otorgados: [SELECT]</span>
-                <span class="bg-black/40 px-2 py-0.5 rounded border border-rose-500/30 text-rose-300">Permisos denegados: [INSERT, UPDATE, DELETE, DROP]</span>
-              </div>
-            </div>
-          </div>
-        `;
-      });
-      if (window.lucide) lucide.createIcons();
-    }
-  } catch (err) {
-    boxes.forEach(box => {
-      box.textContent = 'Error: ' + err.message;
-    });
   }
 }
 
@@ -1394,57 +1348,21 @@ async function verificarSalud() {
     const latencia = Math.round(performance.now() - inicio);
     const json = await res.json();
 
-    if (json.status === 'ONLINE') {
+    if (json.success && json.data && json.data.estado === 'activo') {
       const landingStatus = document.getElementById('landingGatewayStatus');
       if (landingStatus) {
-        landingStatus.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block mr-1.5"></span> Sistema Operacional • Enlace nuam Core Activo`;
+        landingStatus.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block mr-1.5"></span> Servicio Operacional • Plataforma Disponible`;
         landingStatus.className = 'text-emerald-700 font-semibold text-xs bg-emerald-50 px-3.5 py-1.5 rounded-full border border-emerald-200 flex items-center space-x-1.5';
       }
     }
   } catch (e) {
-    console.error('Sin conexión con /health');
+    console.error('Sin conexión con /api/health');
     const landingStatus = document.getElementById('landingGatewayStatus');
     if (landingStatus) {
-      landingStatus.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1.5"></span> Gateway Fuera de Línea`;
+      landingStatus.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500 inline-block mr-1.5"></span> Servicio No Disponible`;
       landingStatus.className = 'text-rose-600 font-semibold text-xs bg-rose-50 px-3.5 py-1.5 rounded-full border border-rose-200 flex items-center space-x-1.5';
     }
   }
-}
-
-// Control del Drawer Lateral de nuam Core y Auditoría
-function toggleDrawerCore() {
-  const drawer = document.getElementById('drawerCore');
-  const backdrop = document.getElementById('drawerBackdrop');
-  const panel = document.getElementById('drawerPanel');
-  if (!drawer) return;
-
-  if (drawer.classList.contains('hidden')) {
-    drawer.classList.remove('hidden');
-    setTimeout(() => {
-      if (backdrop) {
-        backdrop.classList.remove('opacity-0');
-        backdrop.classList.add('opacity-100');
-      }
-      if (panel) {
-        panel.classList.remove('translate-x-full');
-        panel.classList.add('translate-x-0');
-      }
-    }, 10);
-    cargarAuditoria();
-  } else {
-    if (backdrop) {
-      backdrop.classList.remove('opacity-100');
-      backdrop.classList.add('opacity-0');
-    }
-    if (panel) {
-      panel.classList.remove('translate-x-0');
-      panel.classList.add('translate-x-full');
-    }
-    setTimeout(() => {
-      drawer.classList.add('hidden');
-    }, 300);
-  }
-  if (window.lucide) lucide.createIcons();
 }
 
 // Alertas Toast
@@ -1483,15 +1401,18 @@ function cerrarAlerta() {
 
 async function cargarUsuarios() {
   try {
-    const userEmail = sessionStorage.getItem('nuam_user_email') || 'cesar.contreras@larrainvial.com';
-    const res = await fetch(`/api/usuarios?usuario=${encodeURIComponent(userEmail)}`);
+    const res = await authFetch('/api/usuarios');
     const json = await res.json();
     if (json.success) {
-      usuariosActuales = json.data;
+      usuariosActuales = (json.data || []).map(u => ({
+        ...u,
+        rango: u.rol || u.rango,
+        estado: (u.activo === 1 || u.activo === true || u.estado === 'ACTIVO') ? 'ACTIVO' : 'SUSPENDIDO'
+      }));
       actualizarMetricasUsuarios();
       filtrarTablaUsuarios();
     } else {
-      mostrarAlerta(json.error || 'Acceso restringido a usuarios', 'error');
+      mostrarAlerta((json.error && json.error.message) || json.error || 'Acceso restringido a usuarios', 'error');
     }
   } catch (err) {
     mostrarAlerta('Error cargando cuentas de usuarios: ' + err.message, 'error');
@@ -1500,9 +1421,9 @@ async function cargarUsuarios() {
 
 function actualizarMetricasUsuarios() {
   const total = usuariosActuales.length;
-  const superAdmins = usuariosActuales.filter(u => u.rango === 'SUPER_ADMIN').length;
-  const operadores = usuariosActuales.filter(u => u.rango === 'OPERADOR_SENIOR' || u.rango === 'ADMIN_CORREDORA').length;
-  const auditores = usuariosActuales.filter(u => u.rango === 'AUDITOR_CMF').length;
+  const superAdmins = usuariosActuales.filter(u => u.rol === 'ADMIN_NUAM' || u.rango === 'ADMIN_NUAM' || u.rango === 'SUPER_ADMIN').length;
+  const operadores = usuariosActuales.filter(u => u.rol === 'OPERADOR_CORREDORA' || u.rango === 'OPERADOR_CORREDORA' || u.rango === 'OPERADOR_SENIOR').length;
+  const auditores = usuariosActuales.filter(u => u.rol === 'REGULADOR_CMF' || u.rol === 'OFICIAL_CUMPLIMIENTO' || u.rango === 'REGULADOR_CMF' || u.rango === 'OFICIAL_CUMPLIMIENTO' || u.rango === 'AUDITOR_CMF').length;
 
   const elTotal = document.getElementById('statTotalUsuarios');
   const elSuper = document.getElementById('statSuperAdmins');
@@ -1512,17 +1433,20 @@ function actualizarMetricasUsuarios() {
   if (elTotal) elTotal.textContent = `${total} ${total === 1 ? 'Cuenta' : 'Cuentas'}`;
   if (elSuper) elSuper.textContent = `${superAdmins} Administrador${superAdmins === 1 ? '' : 'es'}`;
   if (elAdmins) elAdmins.textContent = `${operadores} Operador${operadores === 1 ? '' : 'es'}`;
-  if (elOper) elOper.textContent = `${auditores} Auditor${auditores === 1 ? '' : 'es'}`;
+  if (elOper) elOper.textContent = `${auditores} Fiscalizador${auditores === 1 ? '' : 'es'}`;
 }
 
 function filtrarUsuariosRango(rango) {
   filtroUsuarioRangoActivo = rango;
   const btnIds = {
     'TODOS': 'filtroUsrTodos',
+    'ADMIN_NUAM': 'filtroUsrSuper',
     'SUPER_ADMIN': 'filtroUsrSuper',
-    'ADMIN_CORREDORA': 'filtroUsrAdmin',
+    'OPERADOR_CORREDORA': 'filtroUsrOp',
     'OPERADOR_SENIOR': 'filtroUsrOp',
-    'AUDITOR_CMF': 'filtroUsrAuditor'
+    'REGULADOR_CMF': 'filtroUsrAuditor',
+    'AUDITOR_CMF': 'filtroUsrAuditor',
+    'OFICIAL_CUMPLIMIENTO': 'filtroUsrAdmin'
   };
 
   Object.entries(btnIds).forEach(([r, id]) => {
@@ -1544,7 +1468,15 @@ function filtrarTablaUsuarios() {
 
   let filtrados = usuariosActuales;
   if (filtroUsuarioRangoActivo !== 'TODOS') {
-    filtrados = filtrados.filter(u => u.rango === filtroUsuarioRangoActivo);
+    if (filtroUsuarioRangoActivo === 'ADMIN_NUAM' || filtroUsuarioRangoActivo === 'SUPER_ADMIN') {
+      filtrados = filtrados.filter(u => (u.rol === 'ADMIN_NUAM' || u.rango === 'ADMIN_NUAM' || u.rango === 'SUPER_ADMIN'));
+    } else if (filtroUsuarioRangoActivo === 'OPERADOR_CORREDORA' || filtroUsuarioRangoActivo === 'OPERADOR_SENIOR') {
+      filtrados = filtrados.filter(u => (u.rol === 'OPERADOR_CORREDORA' || u.rango === 'OPERADOR_CORREDORA' || u.rango === 'OPERADOR_SENIOR'));
+    } else if (filtroUsuarioRangoActivo === 'REGULADOR_CMF' || filtroUsuarioRangoActivo === 'AUDITOR' || filtroUsuarioRangoActivo === 'AUDITOR_CMF') {
+      filtrados = filtrados.filter(u => (u.rol === 'REGULADOR_CMF' || u.rol === 'OFICIAL_CUMPLIMIENTO' || u.rango === 'REGULADOR_CMF' || u.rango === 'AUDITOR_CMF'));
+    } else {
+      filtrados = filtrados.filter(u => (u.rol === filtroUsuarioRangoActivo || u.rango === filtroUsuarioRangoActivo));
+    }
   }
 
   if (query) {
@@ -1553,6 +1485,7 @@ function filtrarTablaUsuarios() {
       (u.email && u.email.toLowerCase().includes(query)) ||
       (u.cargo && u.cargo.toLowerCase().includes(query)) ||
       (u.corredora_nombre && u.corredora_nombre.toLowerCase().includes(query)) ||
+      (u.rol && u.rol.toLowerCase().includes(query)) ||
       (u.rango && u.rango.toLowerCase().includes(query))
     );
   }
@@ -1579,43 +1512,31 @@ function renderizarTablaUsuarios(lista) {
   }
 
   const badgeRangos = {
-    'SUPER_ADMIN': { 
-      label: 'ADMINISTRADOR', 
-      bg: 'bg-amber-100 text-amber-800 border-amber-300', 
-      dot: 'bg-amber-500' 
-    },
-    'OPERADOR_SENIOR': { 
-      label: 'OPERADOR', 
-      bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', 
-      dot: 'bg-emerald-500' 
-    },
-    'ADMIN_CORREDORA': { 
-      label: 'OPERADOR', 
-      bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', 
-      dot: 'bg-emerald-500' 
-    },
-    'AUDITOR_CMF': { 
-      label: 'AUDITOR', 
-      bg: 'bg-purple-100 text-purple-800 border-purple-300', 
-      dot: 'bg-purple-500' 
-    }
+    'ADMIN_NUAM': { label: 'ADMINISTRADOR', bg: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500' },
+    'SUPER_ADMIN': { label: 'ADMINISTRADOR', bg: 'bg-amber-100 text-amber-800 border-amber-300', dot: 'bg-amber-500' },
+    'OPERADOR_CORREDORA': { label: 'OPERADOR', bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
+    'OPERADOR_SENIOR': { label: 'OPERADOR', bg: 'bg-emerald-100 text-emerald-800 border-emerald-300', dot: 'bg-emerald-500' },
+    'OFICIAL_CUMPLIMIENTO': { label: 'CUMPLIMIENTO', bg: 'bg-blue-100 text-blue-800 border-blue-300', dot: 'bg-blue-500' },
+    'REGULADOR_CMF': { label: 'REGULADOR CMF', bg: 'bg-purple-100 text-purple-800 border-purple-300', dot: 'bg-purple-500' },
+    'AUDITOR_CMF': { label: 'REGULADOR CMF', bg: 'bg-purple-100 text-purple-800 border-purple-300', dot: 'bg-purple-500' }
   };
 
-  const miRangoActual = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
+  const miRangoActual = getRangoActual();
 
   lista.forEach(u => {
-    const badgeInfo = badgeRangos[u.rango] || { 
-      label: u.rango, 
+    const rolKey = u.rol || u.rango;
+    const badgeInfo = badgeRangos[rolKey] || { 
+      label: rolKey, 
       bg: 'bg-slate-100 text-slate-700 border-slate-200', 
       dot: 'bg-slate-400' 
     };
 
-    const estadoActivo = (u.estado || 'ACTIVO') === 'ACTIVO';
+    const estadoActivo = (u.activo === 1 || u.activo === true || u.estado === 'ACTIVO');
     const initials = u.avatar || (u.nombre ? u.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase() : 'OP');
 
     // Permisos por fila: Exclusivo del Administrador
-    const puedeEditarFila = miRangoActual === 'SUPER_ADMIN';
-    const puedeEliminarFila = miRangoActual === 'SUPER_ADMIN' && u.rango !== 'SUPER_ADMIN';
+    const puedeEditarFila = esUsuarioAdmin();
+    const puedeEliminarFila = esUsuarioAdmin() && rolKey !== 'ADMIN_NUAM' && rolKey !== 'SUPER_ADMIN';
 
     const tr = document.createElement('tr');
     tr.className = 'hover:bg-slate-50 transition border-b border-slate-100';
@@ -1681,32 +1602,45 @@ async function iniciarSesionComoUsuario(id) {
   const u = usuariosActuales.find(x => x.id === id);
   if (!u) return;
 
-  const initials = u.avatar || (u.nombre ? u.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase() : 'OP');
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: u.email, password: 'Nuam2026!' })
+    });
+    const json = await res.json();
+    if (json.success && json.data) {
+      const { token, usuario } = json.data;
+      sessionStorage.setItem('nuam_auth', 'true');
+      sessionStorage.setItem('nuam_token', token);
+      sessionStorage.setItem('nuam_user', usuario.nombre);
+      sessionStorage.setItem('nuam_user_email', usuario.email);
+      sessionStorage.setItem('nuam_user_cargo', usuario.cargo || usuario.rol);
+      sessionStorage.setItem('nuam_user_rank', usuario.rol);
+      sessionStorage.setItem('nuam_user_initials', usuario.nombre.split(' ').map(n=>n[0]).join('').substring(0,2).toUpperCase());
+      sessionStorage.setItem('nuam_user_permissions', JSON.stringify(usuario.permissions || []));
 
-  sessionStorage.setItem('nuam_auth', 'true');
-  sessionStorage.setItem('nuam_user', u.nombre);
-  sessionStorage.setItem('nuam_user_email', u.email);
-  sessionStorage.setItem('nuam_user_cargo', u.cargo);
-  sessionStorage.setItem('nuam_user_rank', u.rango);
-  sessionStorage.setItem('nuam_user_initials', initials);
+      if (usuario.tenant_id && usuario.tenant_id !== 'GLOBAL') {
+        tenantActivo = usuario.tenant_id;
+      } else {
+        tenantActivo = 'corr-lv-01';
+      }
+      sessionStorage.setItem('nuam_tenant', tenantActivo);
 
-  if (u.tenant_id && u.tenant_id !== 'GLOBAL') {
-    tenantActivo = u.tenant_id;
-    sessionStorage.setItem('nuam_tenant', tenantActivo);
+      await mostrarIntranet();
+      cambiarSeccion('calificaciones');
+      mostrarAlerta(`Sesión cambiada a: ${usuario.nombre} (${usuario.rol}).`, 'success');
+    } else {
+      mostrarAlerta('No se pudo iniciar sesión con la cuenta seleccionada: ' + ((json.error && json.error.message) || 'Error de autenticación'), 'error');
+    }
+  } catch (err) {
+    mostrarAlerta('Error al cambiar de sesión: ' + err.message, 'error');
   }
-
-  actualizarBadgesTenant();
-  await cargarCalificaciones();
-  await cargarAuditoria();
-  await cargarBolsaCentral();
-  mostrarAlerta(`Sesión cambiada a: ${u.nombre} (${u.rango}).`, 'success');
-  cambiarSeccion('calificaciones');
 }
 
 function abrirModalUsuario(id = null) {
-  const miRango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (miRango === 'AUDITOR_CMF' || miRango === 'OPERADOR_SENIOR') {
-    mostrarAlerta(`Acceso Denegado: Su rango (${miRango}) no posee autorización para administrar cuentas de usuario.`, 'error');
+  if (!esUsuarioAdmin()) {
+    mostrarAlerta('Acceso Denegado: Su rango no posee autorización para administrar cuentas de usuario.', 'error');
     return;
   }
 
@@ -1725,17 +1659,6 @@ function abrirModalUsuario(id = null) {
     const u = usuariosActuales.find(x => x.id === id);
     if (!u) return;
 
-    if (miRango === 'ADMIN_CORREDORA') {
-      if (u.rango === 'SUPER_ADMIN') {
-        mostrarAlerta('Acceso Denegado: Un Jefe de Mesa no puede modificar cuentas de Super Administrador.', 'error');
-        return;
-      }
-      if (u.tenant_id !== tenantActivo && u.tenant_id !== 'GLOBAL') {
-        mostrarAlerta('Aislamiento Multitenant: No puede administrar usuarios de otras corredoras.', 'error');
-        return;
-      }
-    }
-
     if (titulo) titulo.textContent = `Editar Cuenta: ${u.nombre}`;
     if (btnGuardar) btnGuardar.textContent = 'Guardar Cambios';
     if (inputId) inputId.value = u.id;
@@ -1743,29 +1666,27 @@ function abrirModalUsuario(id = null) {
     if (inputEmail) inputEmail.value = u.email;
     if (selectTenant) {
       selectTenant.value = u.tenant_id;
-      selectTenant.disabled = (miRango === 'ADMIN_CORREDORA');
+      selectTenant.disabled = false;
     }
     if (selectRango) {
-      selectRango.value = u.rango;
-      ajustarOpcionesRango(miRango, selectRango);
+      selectRango.value = u.rol || u.rango || 'OPERADOR_CORREDORA';
     }
-    if (inputCargo) inputCargo.value = u.cargo;
-    if (selectEstado) selectEstado.value = u.estado || 'ACTIVO';
+    if (inputCargo) inputCargo.value = u.cargo || '';
+    if (selectEstado) selectEstado.value = (u.activo === 1 || u.activo === true || u.estado === 'ACTIVO') ? 'ACTIVO' : 'SUSPENDIDO';
   } else {
-    if (titulo) titulo.textContent = 'Crear Cuenta de Operador';
+    if (titulo) titulo.textContent = 'Crear Cuenta Institucional';
     if (btnGuardar) btnGuardar.textContent = 'Guardar Cuenta';
     if (inputId) inputId.value = '';
     if (inputNombre) inputNombre.value = '';
     if (inputEmail) inputEmail.value = '';
     if (selectTenant) {
       selectTenant.value = tenantActivo || 'corr-lv-01';
-      selectTenant.disabled = (miRango === 'ADMIN_CORREDORA');
+      selectTenant.disabled = false;
     }
     if (selectRango) {
-      selectRango.value = 'OPERADOR_SENIOR';
-      ajustarOpcionesRango(miRango, selectRango);
+      selectRango.value = 'OPERADOR_CORREDORA';
     }
-    if (inputCargo) inputCargo.value = 'Operador Renta Variable';
+    if (inputCargo) inputCargo.value = 'Operador Mesa Tributaria';
     if (selectEstado) selectEstado.value = 'ACTIVO';
   }
 
@@ -1777,16 +1698,7 @@ function ajustarOpcionesRango(miRango, selectRango) {
   if (!selectRango) return;
   const opciones = selectRango.querySelectorAll('option');
   opciones.forEach(opt => {
-    if (miRango === 'ADMIN_CORREDORA') {
-      // Un admin de corredora solo puede crear o editar Operadores y Admins de Mesa
-      if (opt.value === 'SUPER_ADMIN' || opt.value === 'AUDITOR_CMF') {
-        opt.disabled = true;
-      } else {
-        opt.disabled = false;
-      }
-    } else {
-      opt.disabled = false;
-    }
+    opt.disabled = false;
   });
 }
 
@@ -1797,8 +1709,7 @@ function cerrarModalUsuario() {
 
 async function guardarUsuario(e) {
   if (e) e.preventDefault();
-  const miRango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (miRango === 'AUDITOR_CMF' || miRango === 'OPERADOR_SENIOR') {
+  if (!esUsuarioAdmin()) {
     mostrarAlerta('Acceso Denegado: Su rango no posee autorización para guardar cuentas.', 'error');
     return;
   }
@@ -1807,45 +1718,46 @@ async function guardarUsuario(e) {
   const nombre = document.getElementById('formUsuarioNombre').value.trim();
   const email = document.getElementById('formUsuarioEmail').value.trim();
   let tenant_id = document.getElementById('formUsuarioTenant').value;
-  const rango = document.getElementById('formUsuarioRango').value;
+  const rolInput = document.getElementById('formUsuarioRango').value;
+  const mapaRoles = {
+    'SUPER_ADMIN': 'ADMIN_NUAM',
+    'OPERADOR_SENIOR': 'OPERADOR_CORREDORA',
+    'ADMIN_CORREDORA': 'OPERADOR_CORREDORA',
+    'AUDITOR_CMF': 'REGULADOR_CMF',
+    'ADMIN_NUAM': 'ADMIN_NUAM',
+    'OPERADOR_CORREDORA': 'OPERADOR_CORREDORA',
+    'OFICIAL_CUMPLIMIENTO': 'OFICIAL_CUMPLIMIENTO',
+    'REGULADOR_CMF': 'REGULADOR_CMF'
+  };
+  const rol = mapaRoles[rolInput] || rolInput;
   const cargo = document.getElementById('formUsuarioCargo').value.trim();
   const estado = document.getElementById('formUsuarioEstado').value;
-
-  // Si es ADMIN_CORREDORA, forzar tenant a su corredora asignada y restringir rango
-  if (miRango === 'ADMIN_CORREDORA') {
-    tenant_id = tenantActivo;
-    if (rango === 'SUPER_ADMIN' || rango === 'AUDITOR_CMF') {
-      mostrarAlerta('Acceso Denegado: Un Jefe de Mesa no puede otorgar rangos de Super Admin ni Auditor CMF.', 'error');
-      return;
-    }
-  }
-
-  const autor = sessionStorage.getItem('nuam_user_email') || 'cesar.contreras@larrainvial.com';
+  const activo = estado === 'ACTIVO' ? 1 : 0;
 
   try {
     let res;
     if (id) {
-      res = await fetch(`/api/usuarios/${id}`, {
+      res = await authFetch(`/api/usuarios/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, email, tenant_id, rango, cargo, estado, autor })
+        body: JSON.stringify({ nombre, email, tenant_id, rol, cargo, activo })
       });
     } else {
-      res = await fetch('/api/usuarios', {
+      res = await authFetch('/api/usuarios', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, email, tenant_id, rango, cargo, estado, autor })
+        body: JSON.stringify({ nombre, email, password: 'Nuam2026!', tenant_id, rol, cargo, activo })
       });
     }
 
     const json = await res.json();
     if (json.success) {
-      mostrarAlerta(id ? 'Cuenta institucional actualizada con éxito.' : 'Nueva cuenta creada y rango asignado correctamente.', 'success');
+      mostrarAlerta(id ? 'Cuenta institucional actualizada con éxito.' : 'Nueva cuenta creada y rol asignado correctamente.', 'success');
       cerrarModalUsuario();
       await cargarUsuarios();
       actualizarBadgesTenant();
     } else {
-      mostrarAlerta('Error: ' + (json.error || json.mensaje || json.message || 'No se pudo guardar el usuario.'), 'error');
+      mostrarAlerta('Error: ' + ((json.error && json.error.message) || json.error || json.mensaje || json.message || 'No se pudo guardar el usuario.'), 'error');
     }
   } catch (err) {
     mostrarAlerta('Error de comunicación con el servidor: ' + err.message, 'error');
@@ -1853,35 +1765,21 @@ async function guardarUsuario(e) {
 }
 
 async function eliminarUsuarioCuenta(id) {
-  const miRango = sessionStorage.getItem('nuam_user_rank') || 'SUPER_ADMIN';
-  if (miRango === 'AUDITOR_CMF' || miRango === 'OPERADOR_SENIOR') {
-    mostrarAlerta(`Acceso Denegado: Su rango (${miRango}) no posee autorización para revocar cuentas.`, 'error');
+  if (!esUsuarioAdmin()) {
+    mostrarAlerta('Acceso Denegado: Su rango no posee autorización para revocar cuentas.', 'error');
     return;
   }
 
   const u = usuariosActuales.find(x => x.id === id);
   if (!u) return;
 
-  if (miRango === 'ADMIN_CORREDORA') {
-    if (u.rango === 'SUPER_ADMIN' || u.rango === 'AUDITOR_CMF') {
-      mostrarAlerta('Acceso Denegado: Un Jefe de Mesa no puede eliminar cuentas de Super Admin ni Auditores.', 'error');
-      return;
-    }
-    if (u.tenant_id !== tenantActivo) {
-      mostrarAlerta('Aislamiento Multitenant: No puede eliminar usuarios de otra corredora.', 'error');
-      return;
-    }
-  }
-
   const nombre = u ? u.nombre : 'este usuario';
   if (!confirm(`¿Está seguro de revocar y eliminar la cuenta de ${nombre}?`)) {
     return;
   }
 
-  const autor = sessionStorage.getItem('nuam_user_email') || 'cesar.contreras@larrainvial.com';
-
   try {
-    const res = await fetch(`/api/usuarios/${id}?autor=${encodeURIComponent(autor)}`, {
+    const res = await authFetch(`/api/usuarios/${id}`, {
       method: 'DELETE'
     });
     const json = await res.json();
@@ -1889,7 +1787,7 @@ async function eliminarUsuarioCuenta(id) {
       mostrarAlerta('Cuenta eliminada de los registros institucionales.', 'success');
       await cargarUsuarios();
     } else {
-      mostrarAlerta('Error al eliminar: ' + (json.error || json.mensaje || json.message || 'No se pudo eliminar la cuenta.'), 'error');
+      mostrarAlerta('Error al eliminar: ' + ((json.error && json.error.message) || json.error || 'No se pudo eliminar la cuenta.'), 'error');
     }
   } catch (err) {
     mostrarAlerta('Error de comunicación: ' + err.message, 'error');

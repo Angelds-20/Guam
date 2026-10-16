@@ -1,87 +1,102 @@
+/**
+ * Punto de entrada de la API REST - nuam exchange.
+ * Intranet B2B para el Mantenedor de Declaraciones Tributarias y Carga Masiva.
+ *
+ * Exporta `{ app, start }` para permitir pruebas sin abrir el puerto;
+ * inicia el servidor únicamente cuando se ejecuta de forma directa.
+ */
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const dotenv = require('dotenv');
-const apiRoutes = require('./routes/apiRoutes');
 
 dotenv.config();
 
+const { inicializarBaseDeDatos } = require('./database');
+const apiRoutes = require('./routes');
+const requestContext = require('./middlewares/requestContext');
+const errorHandler = require('./middlewares/errorHandler');
+const { fail } = require('./utils/response');
+
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
+// ---------------------------------------------------------------------------
 // Middlewares globales
+// ---------------------------------------------------------------------------
+app.disable('x-powered-by');
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(requestContext);
 
-// Cabeceras de seguridad HTTP (Estándar Modern Web Dev / OWASP)
+// Cabeceras de seguridad HTTP (OWASP).
 app.use((req, res, next) => {
   res.setHeader('X-DNS-Prefetch-Control', 'off');
   res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'origin-when-cross-origin');
-  if (process.env.NODE_ENV === 'production') {
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  if (process.env.NODE_ENV === 'production' && req.secure) {
     res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
   }
   next();
 });
 
-// Desactivar caché estático para evitar problemas de caché en navegadores
-app.use((req, res, next) => {
-  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-  res.set('Pragma', 'no-cache');
-  res.set('Expires', '0');
+// Los endpoints de la API no deben almacenarse en caché.
+app.use('/api', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
   next();
 });
 
-// Servir archivos estáticos del frontend
-app.use(express.static(path.join(__dirname, '..', 'public'), {
-  etag: false,
-  maxAge: 0,
-  setHeaders: (res) => {
-    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    res.set('Pragma', 'no-cache');
-    res.set('Expires', '0');
-  }
-}));
+// Frontend estático (desacoplado de la API).
+app.use(express.static(path.join(__dirname, '..', 'public'), { etag: false, maxAge: 0 }));
 
-// Enrutador de APIs
+// ---------------------------------------------------------------------------
+// API REST
+// ---------------------------------------------------------------------------
 app.use('/api', apiRoutes);
 
-// Manejo de errores global
-app.use((err, req, res, next) => {
-  console.error('Error no controlado:', err.stack);
-  res.status(500).json({
-    success: false,
-    error: 'Error interno del servidor en nuam exchange.',
-    mensaje: err.message
-  });
+// Recurso no encontrado.
+app.use((req, res) => {
+  if (req.path.startsWith('/api')) {
+    return fail(res, { status: 404, code: 'NO_ENCONTRADO', message: 'Recurso no encontrado.' });
+  }
+  return res.status(404).send('Recurso no encontrado.');
 });
 
-// Iniciar servidor con fallback inteligente si el puerto está ocupado
-function startServer(port) {
-  const server = app.listen(port, '0.0.0.0', () => {
-    console.log(`=======================================================`);
-    console.log(`🚀 NUAM EXCHANGE - INTRANET B2B TRIBUTARIA`);
-    console.log(`📡 Servidor activo en: http://localhost:${port}`);
-    console.log(`🌐 Despliegue en AWS EC2: http://TU_IP_ELASTICA:${port}`);
-    console.log(`☁️  Compatible con Render y AWS Cloud`);
-    console.log(`=======================================================`);
+// Manejador global de errores (siempre al final).
+app.use(errorHandler);
+
+// ---------------------------------------------------------------------------
+// Inicio del servidor
+// ---------------------------------------------------------------------------
+function start(port = PORT) {
+  inicializarBaseDeDatos();
+  const server = app.listen(port, () => {
+    const direccion = server.address();
+    const puerto = typeof direccion === 'object' && direccion ? direccion.port : port;
+    // eslint-disable-next-line no-console
+    console.log(`[nuam-exchange] API activa en http://localhost:${puerto} y http://127.0.0.1:${puerto}`);
   });
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.warn(`⚠️ Puerto ${port} ocupado por otra aplicación. Probando en puerto ${port + 1}...`);
-      startServer(port + 1);
+      // eslint-disable-next-line no-console
+      console.warn(`[nuam-exchange] Puerto ${port} en uso. Intentando ${port + 1}...`);
+      start(port + 1);
     } else {
-      console.error('Error al iniciar el servidor:', err);
+      // eslint-disable-next-line no-console
+      console.error('[nuam-exchange] Error al iniciar el servidor:', err);
+      process.exit(1);
     }
   });
+
+  return server;
 }
 
-const initialPort = Number(process.env.PORT) || 3000;
-startServer(initialPort);
+if (require.main === module) {
+  start(PORT);
+}
 
-module.exports = app;
-
+module.exports = { app, start };
