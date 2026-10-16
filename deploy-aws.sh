@@ -12,9 +12,9 @@ echo ">>> [2/6] Instalando Node.js 20, Nginx, Git y herramientas de compilación
 sudo dnf install -y nodejs20 nodejs20-npm nginx git gcc-c++ make python3 || sudo dnf install -y nodejs npm nginx git gcc-c++ make python3 || sudo yum install -y nodejs npm nginx git gcc-c++ make python3
 
 echo ">>> [3/6] Preparando configuración de entorno e instalando dependencias..."
-if [ ! -f .env ] && [ -f .env.example ]; then
-    echo ">>> Generando archivo .env a partir de .env.example..."
-    cp .env.example .env
+if [ ! -f .env ]; then
+    echo "PORT=3000" > .env
+    echo "NODE_ENV=production" >> .env
 fi
 npm install --production
 
